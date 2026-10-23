@@ -191,6 +191,27 @@ let RapidFire = 0, SuperJ = 0, SteamCount = 0, lp = 0;
 let wposx = 0, wposy = 0, DXPos = 0, DYPos = 0, DXPos2 = 0, DYPos2 = 0, FYpos = 0, TileX = 0, FTileX = 0, TileIndex = 0, FTileIndex = 0;
 const Drops = new Int16Array(800);         // 400 drops: x,y  (first 200 background, last 200 foreground)
 let SkyBright = 63, SkyBrightDr = 0, SkyBrightCt = 0, TractionType = 0, frameinc = 0, BonusFrame = 0, HalfFrame = 0, atilecount = 0;
+// Mobile build: jumping keeps its horizontal momentum (inertia); steering in the air is gentle.
+let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
+const AIR_MAX = 2.4, AIR_ACCEL = 0.1, AIR_DRAG = 0.02;
+function airSteer() {
+  const L = keys[203] || keys[75], R = keys[205] || keys[77];
+  let target = 0;
+  if (L && !R) { target = -AIR_MAX; MCB &= 254; } else if (R && !L) { target = AIR_MAX; MCB |= 1; }
+  if (target === 0) airVX += Math.max(-AIR_DRAG, Math.min(AIR_DRAG, -airVX));            // drift, no instant stop
+  else if (!(Math.sign(airVX) === Math.sign(target) && Math.abs(airVX) >= AIR_MAX))     // never slow down a run you are already in
+    airVX += Math.max(-AIR_ACCEL, Math.min(AIR_ACCEL, target - airVX));                  // limited braking/turning
+  if (airVX < 0 && (Collision & 12)) airVX = 0;
+  if (airVX > 0 && (Collision & 48)) airVX = 0;
+  airFrac += airVX;
+  const st = airFrac < 0 ? Math.ceil(airFrac) : Math.floor(airFrac);
+  wposx = s16(wposx + st); airFrac -= st;
+}
+// land: turn the air speed back into the original momentum counters so ground movement carries on smoothly
+function landMomentum() {
+  const a = Math.abs(airVX), m = a >= 3.5 ? 35 : a >= 1.5 ? 20 : a > 0.3 ? 10 : 0;
+  if (airVX < 0) { MomRight = m; MomLeft = 0; } else { MomLeft = m; MomRight = 0; }
+}
 const DROPBASE = 0x1234;                   // stands in for OFFSET Drops (only used for colour jitter)
 
 // ===================================================================================
@@ -858,6 +879,7 @@ function collani() {
       En.pb(si + 12, En.b(si + 12) & ~4);
       if (!(ax > 319 || ax < -31 || bx > 190 || bx < -31)) {
         psprite32(ax, bx, En.b(si + 7), En.b(si + 8), En.sb(si + 11));
+        EnemySFX.voice(e, En.b(si), En.b(si + 7), En.b(si + 1), En.b(si + 8), ax, bx);
         En.pb(si + 12, En.b(si + 12) | 4);
       }
       if (BonusFrame & 2) En.pb(si + 8, (En.b(si + 8) + 1) & 255);
@@ -1132,43 +1154,54 @@ async function GameLoop() {
     cx += cx; bx += bx;
     let dl = 1;
     if (TractionType !== 0) dl = HalfFrame;
-    left: {
-      if (!(al === 1 || keys[203])) break left;
-      if (!(Collision & 1)) { dl = 1; if (Collision & 12) break left; }
-      if (Collision & 4) { MomRight = 0; break left; }
-      MCB &= 254; MomLeft = 0;
-      if (MomRight > 30) { wposx = s16(wposx + bx - 5); break left; }
-      if (MomRight >= 15 && MomRight <= 30) { wposx = s16(wposx - 2); MomRight = (MomRight + dl + dl) & 255; break left; }
-      wposx = s16(wposx - 1); MomRight = (MomRight + dl) & 255;
-    }
-    right: {
-      if (!(al === 2 || keys[205])) break right;
-      if (!(Collision & 1)) { dl = 1; if (Collision & 48) break right; }
-      if (Collision & 16) { MomLeft = 0; break right; }
-      MCB |= 1; MomRight = 0;
-      if (MomLeft > 30) { wposx = s16(wposx - (cx - 5)); break right; }
-      if (MomLeft >= 15 && MomLeft <= 30) { wposx = s16(wposx + 2); MomLeft = (MomLeft + dl + dl) & 255; break right; }
-      wposx = s16(wposx + 1); MomLeft = (MomLeft + dl) & 255;
-    }
-    // ---- Momentum handler
-    MCB &= 191;
-    mn: {
-      if (al !== 0) break mn;
-      if (keys[203] || keys[204] || keys[205] || keys[206]) break mn;
-      MCB |= 64;
-      dl = 25;
-      if (TractionType !== 0) dl = 15;
-      if (!(Collision & 1)) dl = 25;
-      if (!(Collision & 4)) {
-        if (MomRight >= dl) { wposx = s16(wposx - 3); MomRight--; break mn; }
-        if (MomRight > 10) { wposx = s16(wposx - 1); MomRight -= 2; break mn; }
+    const air = !(Collision & 1);
+    if (air) {
+      if (!wasAir) { airVX = groundVX; airFrac = 0; wasAir = true; }
+      if ((MCB & 4) && HitCount === 35) { if (MomRight === 80) airVX = -4; else if (MomLeft === 80) airVX = 4; MomLeft = MomRight = 0; }
+      MCB &= 191;
+      airSteer();
+    } else {
+      if (wasAir) { landMomentum(); wasAir = false; }
+      const x0 = wposx;
+      left: {
+        if (!(al === 1 || keys[203])) break left;
+        if (!(Collision & 1)) { dl = 1; if (Collision & 12) break left; }
+        if (Collision & 4) { MomRight = 0; break left; }
+        MCB &= 254; MomLeft = 0;
+        if (MomRight > 30) { wposx = s16(wposx + bx - 5); break left; }
+        if (MomRight >= 15 && MomRight <= 30) { wposx = s16(wposx - 2); MomRight = (MomRight + dl + dl) & 255; break left; }
+        wposx = s16(wposx - 1); MomRight = (MomRight + dl) & 255;
       }
-      MomRight = 0;
-      if (!(Collision & 16)) {
-        if (MomLeft >= dl) { wposx = s16(wposx + 3); MomLeft--; break mn; }
-        if (MomLeft > 10) { wposx = s16(wposx + 1); MomLeft -= 2; break mn; }
+      right: {
+        if (!(al === 2 || keys[205])) break right;
+        if (!(Collision & 1)) { dl = 1; if (Collision & 48) break right; }
+        if (Collision & 16) { MomLeft = 0; break right; }
+        MCB |= 1; MomRight = 0;
+        if (MomLeft > 30) { wposx = s16(wposx - (cx - 5)); break right; }
+        if (MomLeft >= 15 && MomLeft <= 30) { wposx = s16(wposx + 2); MomLeft = (MomLeft + dl + dl) & 255; break right; }
+        wposx = s16(wposx + 1); MomLeft = (MomLeft + dl) & 255;
       }
-      MomLeft = 0;
+      // ---- Momentum handler
+      MCB &= 191;
+      mn: {
+        if (al !== 0) break mn;
+        if (keys[203] || keys[204] || keys[205] || keys[206]) break mn;
+        MCB |= 64;
+        dl = 25;
+        if (TractionType !== 0) dl = 15;
+        if (!(Collision & 1)) dl = 25;
+        if (!(Collision & 4)) {
+          if (MomRight >= dl) { wposx = s16(wposx - 3); MomRight--; break mn; }
+          if (MomRight > 10) { wposx = s16(wposx - 1); MomRight -= 2; break mn; }
+        }
+        MomRight = 0;
+        if (!(Collision & 16)) {
+          if (MomLeft >= dl) { wposx = s16(wposx + 3); MomLeft--; break mn; }
+          if (MomLeft > 10) { wposx = s16(wposx + 1); MomLeft -= 2; break mn; }
+        }
+        MomLeft = 0;
+      }
+      groundVX = groundVX * .5 + s16(wposx - x0) * .5;
     }
     if (keys[24]) await sleep(50);                            // DEV: O = slow motion
     if (keys[25]) await Pause();
@@ -1309,7 +1342,7 @@ async function GameLoop() {
     if (LastStat === 14) {
       LastStat = 2; MomLeft = 0; MomRight = 0; SteamCount = 0; Frame = 0;
       TScore = Score; TTimer = Timer; TEnergy = Energy;
-      MCB |= 129; MCB &= 247 & 251;
+      MCB |= 129; MCB &= 247 & 251; airVX = groundVX = airFrac = 0; wasAir = false;
       if (Level.b(lp + 4) === 1) MCB |= 1; else MCB &= 254;
     }
     // ---- Random steam
@@ -1383,6 +1416,7 @@ async function main() {
       MCB |= 1; MCB |= 128; MCB &= 239 & 247 & 251;
       Frame = 0; SuperJ = 0; MomLeft = 0; MomRight = 0; JumpStat = 0; LastStat = 0; Energy = 100; TEnergy = 100;
       RapidFire = 0; SteamCount = 0; atilecount = 0;
+      airVX = groundVX = airFrac = 0; wasAir = false; EnemySFX.reset();
       Music.play('level');
       const r = await GameLoop();
       if (gameWon) break;                                     // win screen already shown
