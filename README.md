@@ -19,3 +19,7 @@ F1 sound, F2 weather, F3 parallax. Debug keys from the original: L end level, T 
 
 - Only level 1 data exists in the shipped game; finishing it returns to the menu.
 - Sound is hooked up to the original WAVs via Web Audio (the shipped DOS build had it compiled out).
+
+## Original source
+
+The original Borland C / TASM source is in `original/` (CP437 encoded; `FREEZE.CPP` is the entry point).
