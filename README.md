@@ -23,3 +23,9 @@ F1 sound, F2 weather, F3 parallax. Debug keys from the original: L end level, T 
 ## Original source
 
 The original Borland C / TASM source is in `original/` (CP437 encoded; `FREEZE.CPP` is the entry point).
+
+## Mobile version
+
+`mobile/` is a separate build: the frame is upscaled to 640x480 (Scale2x, stretched to 4:3), it has on-screen touch
+controls (d-pad, fire, jump, OK / pause / menu), works in portrait and landscape, and has an optional CRT scanline
+effect (CRT button, or F6 on a keyboard). Serve the repo and open `mobile/index.html`.

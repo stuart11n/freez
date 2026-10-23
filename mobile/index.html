@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<title>FREEZ (mobile)</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{margin:0;height:100%;background:#000;color:#ccc;font:14px/1.4 system-ui,sans-serif;overflow:hidden;overscroll-behavior:none;touch-action:none}
+  #app{position:fixed;inset:0;display:grid;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  #screen{justify-self:center;align-self:center;aspect-ratio:4/3;background:#000;image-rendering:auto}
+  .pad{display:flex;gap:14px;align-items:center;justify-content:center;padding:10px}
+  button.k{all:unset;touch-action:none;display:flex;align-items:center;justify-content:center;
+    width:var(--b);height:var(--b);border-radius:50%;background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.35);
+    color:#fff;font:700 calc(var(--b)*.28)/1 system-ui,sans-serif;text-align:center}
+  body.crt #crt{background:rgba(255,255,255,.4)}
+  button.k.on{background:rgba(255,255,255,.4)}
+  button.k.sq{border-radius:14px}
+  .small{--b:44px!important;font-size:13px!important}
+  #msg{position:fixed;left:0;right:0;top:46%;text-align:center;pointer-events:none;text-shadow:0 0 6px #000;font-size:18px}
+  #fs{all:unset;position:fixed;top:calc(6px + env(safe-area-inset-top));right:calc(6px + env(safe-area-inset-right));width:36px;height:36px;
+    text-align:center;line-height:36px;font-size:20px;color:#fff;background:rgba(255,255,255,.12);border-radius:8px;z-index:5}
+  .mid{display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center}
+  .mid .row{display:flex;gap:12px}
+  /* portrait: screen on top, controls underneath */
+  @media (orientation:portrait){
+    #app{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto 1fr auto}
+    #screen{grid-column:1/3;grid-row:1;width:100vw;height:75vw}
+    .pad{gap:8px;padding:6px}
+    #left{grid-column:1;grid-row:2;--b:min(21vw,96px)}
+    #right{grid-column:2;grid-row:2;--b:min(21vw,96px)}
+    #mid{grid-column:1/3;grid-row:3;flex-direction:row;padding:8px 6px 12px}
+  }
+  /* landscape: controls on either side of the screen */
+  @media (orientation:landscape){
+    #app{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+    #screen{grid-column:2;grid-row:1;height:100vh;width:133.33vh;max-width:calc(100vw - 250px);max-height:calc((100vw - 250px)*.75)}
+    .pad{gap:10px;flex-wrap:wrap;align-content:flex-end;padding-bottom:14px}
+    #left,#right{--b:min(20vh,84px)}
+    #left{grid-column:1;grid-row:1}
+    #right{grid-column:3;grid-row:1}
+    #mid{position:fixed;left:calc(6px + env(safe-area-inset-left));top:6px;width:84px;flex-direction:row;flex-wrap:wrap;gap:6px;z-index:3}
+    #mid .small{--b:38px!important;font-size:10px!important}
+  }
+  body.desktop .pad,body.desktop #mid,body.desktop #fs{display:none}
+  body.desktop #screen{width:min(100vw,133.33vh);height:min(75vw,100vh);max-width:none;max-height:none}
+</style></head><body>
+<div id="app">
+  <canvas id="screen" width="640" height="480"></canvas>
+  <div id="left" class="pad">
+    <button class="k" data-code="ArrowLeft">&#9664;</button>
+    <button class="k" data-code="ArrowRight">&#9654;</button>
+  </div>
+  <div id="right" class="pad">
+    <button class="k" data-code="KeyX">FIRE</button>
+    <button class="k" data-code="KeyZ">JUMP</button>
+  </div>
+  <div id="mid" class="mid">
+    <button class="k sq small" data-code="Enter">OK</button>
+    <button class="k sq small" data-code="KeyP">PAUSE</button>
+    <button class="k sq small" data-code="Escape">MENU</button>
+    <button class="k sq small" id="crt">CRT</button>
+  </div>
+</div>
+<button id="fs" aria-label="Fullscreen">&#9974;</button>
+<div id="msg">Loading...</div>
+<script src="tables.js"></script>
+<script src="freez.js"></script>
+<script src="touch.js"></script>
+</body></html>
