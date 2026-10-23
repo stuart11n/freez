@@ -200,6 +200,9 @@ const Drops = new Int16Array(800);         // 400 drops: x,y  (first 200 backgro
 let SkyBright = 63, SkyBrightDr = 0, SkyBrightCt = 0, TractionType = 0, frameinc = 0, BonusFrame = 0, HalfFrame = 0, atilecount = 0;
 // Mobile build: jumping keeps its horizontal momentum (inertia); steering in the air is gentle.
 let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
+// Mobile build: jump again in the air to flap your wings for a small boost (once per airtime)
+let jumpPrev = false, flapsLeft = 1, flapT = 0;
+const FLAPS_MAX = 1, FLAP_BOOST = 12, FLAP_FRAMES = 22;
 const AIR_MAX = 1.7, AIR_ACCEL = 0.04, AIR_DRAG = 0.012;
 function airSteer() {
   const L = keys[203] || keys[75], R = keys[205] || keys[77];
@@ -1219,6 +1222,15 @@ async function GameLoop() {
       if (Firing !== 0 && RapidFire !== 0) Firing--;
     }
     if (keys[56] && IceBallNo !== 0 && Firing === 0) Firing = 20;
+    // ---- Wing flap: a fresh jump press while airborne
+    {
+      const jk = !!keys[29];
+      if (Collision & 1) flapsLeft = FLAPS_MAX;
+      else if (jk && !jumpPrev && flapsLeft > 0 && !(MCB & 4) && LastStat < 13) {
+        flapsLeft--; JumpStat = FLAP_BOOST; MCB |= 8; MCB &= 239; GravStat = 64; flapT = FLAP_FRAMES; ps2(13);
+      }
+      jumpPrev = jk;
+    }
     // ---- Jump
     jump: {
       if (!keys[29]) { MCB &= 239; break jump; }
@@ -1238,6 +1250,10 @@ async function GameLoop() {
     }
     // ---- Main character frame control
     anim: {
+      if (flapT > 0 && LastStat < 13) {                       // wings out: the falling sprites double as the flap animation
+        LastStat = 6; Frame = 52 + Math.min(15, ((FLAP_FRAMES - flapT) * 16 / FLAP_FRAMES) | 0); flapT--;
+        break anim;
+      }
       if (!falling) {
         if (LastStat === 13) {
           if (Frame === 143) LastStat = 14; else Frame++;
@@ -1349,7 +1365,7 @@ async function GameLoop() {
     if (LastStat === 14) {
       LastStat = 2; MomLeft = 0; MomRight = 0; SteamCount = 0; Frame = 0;
       TScore = Score; TTimer = Timer; TEnergy = Energy;
-      MCB |= 129; MCB &= 247 & 251; airVX = groundVX = airFrac = 0; wasAir = false;
+      MCB |= 129; MCB &= 247 & 251; airVX = groundVX = airFrac = 0; wasAir = false; flapT = 0; flapsLeft = FLAPS_MAX;
       if (Level.b(lp + 4) === 1) MCB |= 1; else MCB &= 254;
     }
     // ---- Random steam
@@ -1423,7 +1439,7 @@ async function main() {
       MCB |= 1; MCB |= 128; MCB &= 239 & 247 & 251;
       Frame = 0; SuperJ = 0; MomLeft = 0; MomRight = 0; JumpStat = 0; LastStat = 0; Energy = 100; TEnergy = 100;
       RapidFire = 0; SteamCount = 0; atilecount = 0;
-      airVX = groundVX = airFrac = 0; wasAir = false; EnemySFX.reset();
+      airVX = groundVX = airFrac = 0; wasAir = false; jumpPrev = false; flapsLeft = FLAPS_MAX; flapT = 0; EnemySFX.reset();
       Music.play('level');
       const r = await GameLoop();
       if (gameWon) break;                                     // win screen already shown

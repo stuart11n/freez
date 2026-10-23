@@ -50,3 +50,4 @@ effect (CRT button, or F6 on a keyboard). Serve the repo and open `mobile/index.
   drift), and landing hands the speed back to the ground momentum code.
 - **Enemy voices:** birds squawk and the yellow hoppers squish as they land, quieter and panned by distance when they
   are near. Synthesised, no audio files.
+- **Wing flap:** press jump again in the air (once per airtime) to flap your wings for a small extra boost in height.
