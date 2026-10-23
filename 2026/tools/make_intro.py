@@ -1,4 +1,4 @@
-"""Generates mobile/assets/intro.tga: the "DIGITAL SYNAPSE presents" title card.
+"""Generates 2026/assets/intro.tga: the "DIGITAL SYNAPSE presents" title card.
 
 Output is a 320x200 8-bit colour-mapped TGA in exactly the layout the game's LoadTitle() reads
 (18 byte header, 256 BGR palette at 0x12, raw top-down pixels at 0x312).  The palette is sorted by brightness
