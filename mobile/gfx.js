@@ -4,7 +4,7 @@
 // resolution instead of stretching a fixed 640x480 image.
 
 const Settings = (() => {
-  const s = { crt: 0, scale: 1, music: true, sfx: true };   // crt: 0 off, 1 scanlines, 2 full CRT;  scale: 0 pixel, 1 sharp, 2 smooth
+  const s = { crt: 2, scale: 2, music: true, sfx: true };   // crt: 0 off, 1 scanlines, 2 full CRT;  scale: 0 pixel, 1 sharp, 2 smooth
   try { Object.assign(s, JSON.parse(localStorage.getItem('freez.settings') || '{}')); } catch (e) { }
   s.save = () => { try { localStorage.setItem('freez.settings', JSON.stringify({ crt: s.crt, scale: s.scale, music: s.music, sfx: s.sfx })); } catch (e) { } };
   return s;

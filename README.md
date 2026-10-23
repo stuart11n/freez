@@ -33,7 +33,7 @@ effect (CRT button, or F6 on a keyboard). Serve the repo and open `mobile/index.
 ### Mobile build extras
 
 - **Display:** WebGL shader with three scaling filters (Pixel / Sharp / Smooth) and three CRT modes (Off / Scanlines /
-  Full CRT: curvature, beam scanlines, phosphor mask, bloom, vignette). Falls back to a 2D canvas without WebGL.
+  Full CRT is the default: curvature, beam scanlines, phosphor mask, bloom, vignette). Falls back to a 2D canvas without WebGL.
   Settings panel via the gear button; hotkeys F6 (CRT), F7 (scaling), F8 (music).
 - **Chiptune:** procedurally sequenced music (two pulse channels, triangle bass, noise drums) for the menu and the level,
   plus win and game over jingles. All synthesised with Web Audio, no audio files.
