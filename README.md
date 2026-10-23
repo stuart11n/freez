@@ -35,8 +35,12 @@ effect (CRT button, or F6 on a keyboard). Serve the repo and open `mobile/index.
 - **Display:** WebGL shader with three scaling filters (Pixel / Sharp / Smooth) and three CRT modes (Off / Scanlines /
   Full CRT is the default: curvature, beam scanlines, phosphor mask, bloom, vignette). Falls back to a 2D canvas without WebGL.
   Settings panel via the gear button; hotkeys F6 (CRT), F7 (scaling), F8 (music).
-- **Chiptune:** procedurally sequenced music (two pulse channels, triangle bass, noise drums) for the menu and the level,
-  plus win and game over jingles. All synthesised with Web Audio, no audio files.
+- **Tracker music:** a small ProTracker-style player: songs are order lists of patterns written as text rows (note,
+  instrument, volume, effect), 6 ticks per row, 8-bit looped waveforms and drum samples, hard-panned Amiga-style stereo,
+  and per-tick effects (arpeggio, vibrato, slides, note cut). Menu and level songs plus win and game over jingles; all
+  synthesised with Web Audio, no audio files.
+- **Night:** the clouds fade to dark slate with the sky, and the night storm has low-key distant thunder.
+- **Level intro:** the level intro screen is held for an extra second.
 - **End screens:** win screen with fireworks and a time-bonus tally, and a game over screen.
 - **Longer level 1:** the shipped level had no end flag and an unfinished, floorless hall in its lower left. The mobile
   build finishes it: the hall is now a long corridor with pits, spikes and blocks, ending in a shaft that drops into a

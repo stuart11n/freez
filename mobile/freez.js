@@ -95,6 +95,32 @@ function ps2(n) {                                   // SOUND.C: ps2() queues SFX
   if (!(GameSetup & 1)) return;
   playBuf(SFX[n]);
 }
+// low-key distant thunder (rate limited): a filtered brown-noise rumble with a couple of rolling swells
+let lastThunder = 0, brownBuf = null;
+function thunder() {
+  if (!(GameSetup & 1) || !actx) return;
+  const now = performance.now();
+  if (now - lastThunder < 4500 + Math.random() * 5000) return;
+  lastThunder = now;
+  if (!brownBuf) {
+    const n = actx.sampleRate * 4, b = actx.createBuffer(1, n, actx.sampleRate), d = b.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < n; i++) { last = (last + (Math.random() * 2 - 1) * .035) / 1.02; d[i] = last * 3.2; }
+    brownBuf = b;
+  }
+  const t = actx.currentTime + .25 + Math.random() * .9, len = 2.4 + Math.random() * 1.4;
+  const src = actx.createBufferSource(), lp = actx.createBiquadFilter(), g = actx.createGain();
+  src.buffer = brownBuf;
+  lp.type = 'lowpass'; lp.frequency.setValueAtTime(320, t); lp.frequency.exponentialRampToValueAtTime(70, t + len);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(.2, t + .12);
+  g.gain.linearRampToValueAtTime(.08, t + .5);
+  g.gain.linearRampToValueAtTime(.17, t + .8 + Math.random() * .3);       // the roll
+  g.gain.linearRampToValueAtTime(.06, t + 1.4);
+  g.gain.exponentialRampToValueAtTime(.0008, t + len);
+  src.connect(lp); lp.connect(g); g.connect(actx.destination);
+  src.start(t, Math.random() * 2); src.stop(t + len + .1);
+}
 const SFXFILES = ['23', '26', '21', '6', '7', '4', '2', '8', '18', '25', '11', '19', '3', '50'];
 
 // ===================================================================================
@@ -309,6 +335,7 @@ function FixPal() {                 // 8 -> 6 bit, BGR -> RGB
   }
 }
 const SavedPal = new Uint8Array(768);
+const cloudBase = new Uint8Array(9);           // original colours of the cloud palette entries 55-57
 function SavePal() { SavedPal.set(palMain); }
 function SetPal() { palMain.set(SavedPal); }
 function Screen(mode) { /* CRTC tweaks for the original 'widescreen' option: nothing to do here */ }
@@ -369,9 +396,12 @@ async function LoadLevel() {
   await Fade2Black(0);
   LoadLogo(CurrentLevel + 9);
   await FadeFromBlack(0);
+  await sleep(1000);                                         // mobile build: hold the level intro screen 1s longer
   BridgeGFX.set(file('brdg1.tga').subarray(0x312, 0x312 + 64));
   tile1.set(file('tset1a.tga').subarray(0x312, 0x312 + 65535));
   tile2.set(file('tset1b.tga').subarray(0x312, 0x312 + 65535));
+  // clouds (tiles 47-52) share palette entries 1/38/54 with sprites; give them private entries 55/56/57 so they can fade at night
+  for (let t = 47; t <= 52; t++) for (let i = t * 1024; i < t * 1024 + 1024; i++) { const v = tile1[i]; if (v === 1) tile1[i] = 55; else if (v === 38) tile1[i] = 56; else if (v === 54) tile1[i] = 57; }
   enemy0.set(file('enemy1a.tga').subarray(0x312, 0x312 + 19456));
   enemy1.set(file('enemy1b.tga').subarray(0x312, 0x312 + 19456));
   tilemap.set(file('tmap1.map').subarray(0, 8192));
@@ -381,6 +411,7 @@ async function LoadLevel() {
   await Fade2Black(0);
   palMain.set(file('dragon.tga').subarray(0x12, 0x12 + 768));
   FixPal();
+  for (const [dst, srcIdx] of [[55, 1], [56, 38], [57, 54]]) for (let k = 0; k < 3; k++) { palMain[dst * 3 + k] = palMain[srcIdx * 3 + k]; cloudBase[(dst - 55) * 3 + k] = palMain[srcIdx * 3 + k]; }
 }
 function LoadGame() {
   MCANIM.set(file('dragon.tga').subarray(0x312, 0x312 + 36864));
@@ -560,6 +591,7 @@ function skyrain() {
     const c1 = SEED2 >>> 31; SEED2 = (SEED2 << 1) >>> 0;
     if (c1) { SEED2 = (SEED2 ^ 0x1D872B41) >>> 0; ax = SEED2 & 0xFFFF; dx = SEED2 >>> 16; }
     if ((ax & 255) <= 20) {
+      thunder();
       ax &= 3;
       let STK4 = ax;
       dx = (dx & 255) + 32;
@@ -1258,8 +1290,15 @@ async function GameLoop() {
       const o = 288, r0 = palMain[o], g0 = palMain[o + 1], b0 = palMain[o + 2];
       for (let k = 0; k < 7; k++) { palMain[o + k * 3] = palMain[o + k * 3 + 3]; palMain[o + k * 3 + 1] = palMain[o + k * 3 + 4]; palMain[o + k * 3 + 2] = palMain[o + k * 3 + 5]; }
       palMain[o + 21] = r0; palMain[o + 22] = g0; palMain[o + 23] = b0;
+      // clouds follow the sky: bright by day, dark bluish-grey at night
+      const lvl = SkyBrightDr === 0 ? SkyBright / 63 : 1 - SkyBright / 63;
+      for (let c = 0; c < 3; c++) {
+        palMain[165 + c * 3] = Math.round(cloudBase[c * 3] * (.28 + .72 * lvl) * (.72 + .28 * lvl));
+        palMain[166 + c * 3] = Math.round(cloudBase[c * 3 + 1] * (.28 + .72 * lvl) * (.78 + .22 * lvl));
+        palMain[167 + c * 3] = Math.round(cloudBase[c * 3 + 2] * (.30 + .70 * lvl));
+      }
       await vsync();
-      if (!(MCB & 128)) dac.set(palMain.subarray(192, 192 + 120), 192);
+      if (!(MCB & 128)) { dac.set(palMain.subarray(192, 192 + 120), 192); dac.set(palMain.subarray(165, 174), 165); }
     } else {
       // NOSCCS: straight to buffer copy
     }
