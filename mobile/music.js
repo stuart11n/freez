@@ -42,6 +42,9 @@ const Music = (() => {
       5: { name: 'kick', buf: oneShot(.2, (t, u) => Math.sin(2 * Math.PI * (48 * t + 130 * (1 - Math.exp(-t * 28)) / 28 * 0 + 92 * (1 - Math.exp(-t * 32)) / 32)) * Math.pow(1 - u, 1.6)), loop: 0 },
       6: { name: 'snare', buf: oneShot(.18, (t, u) => (noiseSeed() * .8 + Math.sin(2 * Math.PI * 190 * t) * .5) * Math.pow(1 - u, 2.2)), loop: 0 },
       7: { name: 'hat', buf: oneShot(.06, (t, u) => noiseSeed() * Math.pow(1 - u, 3) * .8), loop: 0 },
+      9: { name: 'square', buf: cycle(32, p => (p < .5 ? .8 : -.8)), loop: 1, len: 32, decay: .99, att: 1 },
+      10: { name: 'bell', buf: cycle(64, p => Math.sin(p * 6.2832) + .45 * Math.sin(p * 6.2832 * 2) + .25 * Math.sin(p * 6.2832 * 5)), loop: 1, len: 64, decay: .93, att: 1 },
+      11: { name: 'strings', buf: cycle(128, p => (1 - 2 * p) * .6 + Math.sin(p * 6.2832 * 2) * .25), loop: 1, len: 128, decay: 1, att: .2, swell: 10 },
       8: { name: 'tom', buf: oneShot(.22, (t, u) => Math.sin(2 * Math.PI * (120 * t - 60 * Math.pow(t, 2) * 3)) * Math.pow(1 - u, 1.4)), loop: 0 },
     };
   }
@@ -118,6 +121,93 @@ const Music = (() => {
   };
   const lead = s => s.replace(/\s{2,}/g, ' ');
 
+  // ---------------------------------------------------------------- extra songs, built from compact specs
+  const PCN = ['C-', 'C#', 'D-', 'D#', 'E-', 'F-', 'F#', 'G-', 'G#', 'A-', 'A#', 'B-'];
+  const PCV = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+  const nn = m => PCN[m % 12] + (Math.floor(m / 12) - 1);                    // MIDI number -> 'C-4'
+  const chordInfo = sym => { const minor = sym.endsWith('m'); return { root: PCV[minor ? sym.slice(0, -1) : sym], third: minor ? 3 : 4 }; };
+  // lead templates: 8 rows of chord-tone indexes (0,1,2 = root,3rd,5th; +3 = an octave up), null = rest
+  const LT = {
+    a: [2, null, 5, null, 4, null, 2, null], b: [0, 2, 4, 2, 5, 4, 2, 0], c: [4, 4, null, 3, null, 2, null, 3], d: [5, null, 4, null, 3, null, 2, 1],
+    e: [2, null, null, 4, null, null, 3, 2], f: [0, null, 2, null, 4, null, 3, null], g: [3, 4, 5, 4, 3, 2, 3, null], h: [4, null, 3, 2, null, 3, 4, null],
+    i: [5, null, null, 5, 4, null, 3, null], j: [2, 3, 4, null, 5, null, 4, null],
+  };
+  const DK = { K: 'C-3i5v64', S: 'C-3i6v56', h: 'C-3i7v30', H: 'C-3i7v44', t: 'G-2i8v50', '.': '.' };
+  const DRUMS = {     // [normal block, fill block]
+    four: [['K', '.', 'h', '.', 'K', '.', 'h', 'S'], ['K', '.', 'h', '.', 'K', 'S', 'S', 'S']],
+    rock: [['K', '.', 'h', '.', 'S', '.', 'h', 'K'], ['K', '.', 'h', '.', 'S', 'S', 't', 't']],
+    brk: [['K', '.', 'h', 'K', '.', 'S', 'h', '.'], ['K', 'h', 'h', 'K', 'S', 'S', 'S', 'S']],
+    hop: [['K', 'h', 'h', 'h', 'S', 'h', 'h', 'K'], ['K', 'h', 'h', 'h', 'S', 'S', 'S', 'S']],
+  };
+  function bassBlock(style, r, third, inst, v) {     // r = bass root MIDI note
+    const T = (m, vv) => nn(m) + 'i' + inst + 'v' + (vv || v);
+    switch (style) {
+      case 'pump': return [T(r), '.', T(r + 12, v - 12), T(r), '.', T(r), T(r + 12, v - 12), '.'];
+      case 'walk': return [T(r), '.', T(r + third, v - 8), '.', T(r + 7), '.', T(r + third, v - 8), '.'];
+      case 'sync': return [T(r), '.', '.', T(r), '.', T(r + 12, v - 10), '.', T(r)];
+      default: return [T(r), '.', T(r), '.', T(r + 12, v - 8), '.', T(r), T(r + 7, v - 10)];       // 'oct'
+    }
+  }
+  function songBuilder(o) {
+    const pats = o.patterns.map(p => {
+      const ch = [[], [], [], [], []];                                 // lead, arp, bass, drums, pad
+      p.chords.forEach((sym, bi) => {
+        const { root, third } = chordInfo(sym), tones = [0, third, 7];
+        const lm = 12 * (o.leadOct + 1) + root;
+        let first = true;
+        const tpl = LT[p.lead[bi]];
+        let lastNote = -1; tpl.forEach((x, i) => { if (x !== null) lastNote = i; });
+        tpl.forEach((idx, r) => {
+          if (idx === null) { ch[0].push('.'); return; }
+          let t = nn(lm + tones[idx % 3] + 12 * Math.floor(idx / 3));
+          if (first) { t += 'i' + o.leadInst + 'v' + o.leadVol; first = false; }
+          if (o.vib && r === lastNote) t += 'w' + o.vib;
+          ch[0].push(t);
+        });
+        const am = 12 * 5 + root - 12;                                // arp base around octave 4
+        const arpEff = 'a0' + third.toString(16) + '7';
+        const A = nn(am) + 'i' + o.arpInst + arpEff + 'v' + o.arpVol;
+        if (o.arp === 'arp') ch[1].push(A, '.', '.', '.', '.', '.', '.', '.');
+        else if (o.arp === 'stab') ch[1].push('.', '.', A, '^^', '.', '.', A, '^^');
+        else ch[1].push('.', '.', '.', '.', '.', '.', '.', '.');
+        ch[2].push(...bassBlock(o.bass, 36 + root, third, 3, o.bassVol));
+        ch[3].push(...DRUMS[o.drums][bi === 3 && p.fill !== false ? 1 : 0].map(k => DK[k]));
+        if (o.pad) ch[4].push(nn(12 * 4 + root) + 'i' + o.padInst + 'w32v' + o.padVol, '.', '.', '.', '.', '.', '.', '.');
+        else ch[4].push('.', '.', '.', '.', '.', '.', '.', '.');
+      });
+      return pattern(ch.map(c => c.join(' ')));
+    });
+    return { bpm: o.bpm, speed: 6, loop: true, vol: o.vol || 1, orders: o.order.map(i => pats[i]) };
+  }
+  function makeMoreSongs() {
+    return {
+      // D minor, driving four-on-the-floor
+      neon: songBuilder({
+        bpm: 138, leadInst: 1, leadOct: 4, leadVol: 48, vib: '43', arp: 'stab', arpInst: 2, arpVol: 34, bass: 'pump', bassVol: 58, drums: 'four', pad: true, padInst: 4, padVol: 24,
+        patterns: [{ chords: ['Dm', 'A#', 'F', 'C'], lead: ['c', 'b', 'a', 'g'] }, { chords: ['Dm', 'A#', 'Gm', 'A'], lead: ['e', 'h', 'd', 'i'] }, { chords: ['Dm', 'A#', 'F', 'C'], lead: ['b', 'b', 'j', 'g'] }],
+        order: [0, 0, 1, 2, 1, 2],
+      }),
+      // E minor, spacious: bells over strings
+      moss: songBuilder({
+        bpm: 108, leadInst: 10, leadOct: 4, leadVol: 52, arp: 'arp', arpInst: 2, arpVol: 22, bass: 'walk', bassVol: 56, drums: 'rock', pad: true, padInst: 11, padVol: 34,
+        patterns: [{ chords: ['Em', 'C', 'G', 'D'], lead: ['f', 'f', 'a', 'f'] }, { chords: ['Em', 'Am', 'Em', 'B'], lead: ['d', 'e', 'd', 'h'] }],
+        order: [0, 0, 1, 0, 1, 1],
+      }),
+      // C major, bouncy square lead
+      sunny: songBuilder({
+        bpm: 150, leadInst: 9, leadOct: 4, leadVol: 42, arp: 'arp', arpInst: 2, arpVol: 26, bass: 'oct', bassVol: 56, drums: 'hop', pad: true, padInst: 4, padVol: 18,
+        patterns: [{ chords: ['C', 'G', 'Am', 'F'], lead: ['b', 'g', 'c', 'h'] }, { chords: ['C', 'G', 'F', 'G'], lead: ['a', 'g', 'j', 'd'] }, { chords: ['F', 'G', 'C', 'Am'], lead: ['g', 'b', 'i', 'h'] }],
+        order: [0, 1, 0, 1, 2, 2],
+      }),
+      // F# minor, syncopated breakbeat
+      peak: songBuilder({
+        bpm: 126, leadInst: 1, leadOct: 4, leadVol: 46, vib: '53', arp: 'stab', arpInst: 9, arpVol: 26, bass: 'sync', bassVol: 60, drums: 'brk', pad: true, padInst: 11, padVol: 30,
+        patterns: [{ chords: ['F#m', 'D', 'A', 'E'], lead: ['e', 'h', 'a', 'd'] }, { chords: ['Bm', 'F#m', 'D', 'E'], lead: ['f', 'g', 'b', 'i'] }, { chords: ['F#m', 'D', 'A', 'E'], lead: ['c', 'b', 'j', 'g'] }],
+        order: [0, 0, 1, 2, 1, 2],
+      }),
+    };
+  }
+
   // ---------------------------------------------------------------- songs
   function makeSongs() {
     const P = {
@@ -171,7 +261,7 @@ const Music = (() => {
         'A-3i4v30w32 . . . . . . .   F-3i4v30w32 . . . . . . .   E-3i4v30w32 . . . . . . .   . . . . ^^ . . .',
       ])],
     };
-    return { level, menu, win, over };
+    return Object.assign({ level, menu, win, over }, makeMoreSongs());
   }
 
   // ---------------------------------------------------------------- player
@@ -263,21 +353,63 @@ const Music = (() => {
     chans.forEach(ch => stopVoice(ch, t));
     chans = [];
   }
+  // ---- playlist: a random in-game track, then every minute fade out and fade in a different one
+  const PLAYLIST = ['level', 'neon', 'moss', 'sunny', 'peak'];
+  const ROTATE_MS = 60000, FADE_S = 1.6;
+  let playlist = false, plIdx = -1, rotTimer = null;
+  function pickNext() {
+    let i;
+    do { i = Math.floor(Math.random() * PLAYLIST.length); } while (PLAYLIST.length > 1 && i === plIdx);
+    plIdx = i; return PLAYLIST[i];
+  }
+  function ramp(to, secs) {
+    const g = master.gain, t = ctx.currentTime;
+    g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
+    if (secs > 0) g.linearRampToValueAtTime(to, t + secs); else g.setValueAtTime(to, t);
+  }
+  function launch(name, fadeIn) {
+    stopTimer(); silence();
+    song = song_cache[name]; order = 0; row = 0; tick = 0; nextTime = ctx.currentTime + .06;
+    const lvl = .2 * (song.vol || 1);
+    if (fadeIn) { master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setValueAtTime(0, ctx.currentTime); ramp(lvl, FADE_S); }
+    else ramp(lvl, 0);
+    timer = setInterval(schedule, 25); schedule();
+  }
+  function rotate() {
+    rotTimer = null;
+    if (!playlist || !Settings.music || !ctx) return;
+    ramp(0, FADE_S);                                                   // fade out ...
+    rotTimer = setTimeout(() => {
+      if (!playlist || !Settings.music) return;
+      launch(pickNext(), true);                                        // ... and in on a different track
+      rotTimer = setTimeout(rotate, ROTATE_MS);
+    }, FADE_S * 1000 + 60);
+  }
+  function stopPlaylist() { playlist = false; clearTimeout(rotTimer); rotTimer = null; }
   function start(name) {
     wanted = name;
     if (!Settings.music || !ensure()) return;
+    if (name === 'level') {
+      if (playlist && timer) return;
+      stopPlaylist(); playlist = true;
+      launch(pickNext(), false);
+      rotTimer = setTimeout(rotate, ROTATE_MS);
+      return;
+    }
+    stopPlaylist();
     if (song && song === song_cache[name] && timer) return;
     stopTimer(); silence(); song = null;
     if (!name || !song_cache[name]) return;
-    song = song_cache[name]; order = 0; row = 0; tick = 0; nextTime = ctx.currentTime + .06;
-    master.gain.value = .2 * (song.vol || 1);
-    timer = setInterval(schedule, 25); schedule();
+    launch(name, false);
   }
   return {
     play: start,
     get debugMaster() { return master; },
-    stop() { wanted = null; stopTimer(); if (ctx) silence(); song = null; },
+    get debugSongs() { return song_cache; },
+    stop() { wanted = null; stopPlaylist(); stopTimer(); if (ctx) silence(); song = null; },
     ready() { if (wanted) start(wanted); },
-    refresh() { if (Settings.music) start(wanted); else { stopTimer(); if (ctx) silence(); song = null; } },
+    refresh() { if (Settings.music) start(wanted); else { stopPlaylist(); stopTimer(); if (ctx) silence(); song = null; } },
+    get playlistInfo() { return { playlist, current: PLAYLIST[plIdx] }; },
+    skip() { if (playlist) { clearTimeout(rotTimer); rotate(); } },
   };
 })();

@@ -37,7 +37,7 @@ effect (CRT button, or F6 on a keyboard). Serve the repo and open `mobile/index.
   Settings panel via the gear button; hotkeys F6 (CRT), F7 (scaling), F8 (music).
 - **Tracker music:** a small ProTracker-style player: songs are order lists of patterns written as text rows (note,
   instrument, volume, effect), 6 ticks per row, 8-bit looped waveforms and drum samples, hard-panned Amiga-style stereo,
-  and per-tick effects (arpeggio, vibrato, slides, note cut). Menu and level songs plus win and game over jingles; all
+  and per-tick effects (arpeggio, vibrato, slides, note cut). Five in-game songs (the first plays a random one, then every minute it fades out and fades in a different track), a menu song, and win and game over jingles; all
   synthesised with Web Audio, no audio files.
 - **Night:** the clouds fade to dark slate with the sky, and the night storm has low-key distant thunder.
 - **Level intro:** the level intro screen is held for an extra second.
