@@ -113,7 +113,7 @@ const SFXFILES = ['23', '26', '21', '6', '7', '4', '2', '8', '18', '25', '11', '
 // ===================================================================================
 const assets = new Map();
 async function loadAssets() {
-  const names = ['bmap1.map', 'bonuses.tga', 'brdg1.tga', 'dragon.tga', 'emap1.map', 'enemy1a.tga', 'enemy1b.tga', 'freez.tga',
+  const names = ['bmap1.map', 'bonuses.tga', 'brdg1.tga', 'dragon.tga', 'emap1.map', 'enemy1a.tga', 'enemy1b.tga', 'intro.tga',
     'info.tga', 'ldata.dat', 'level1.tga', 'mainmenu.tga', 'setup.tga', 'smap1.map', 'statgfx.tga', 'tmap1.map', 'tset1a.tga', 'tset1b.tga'];
   await Promise.all(names.map(async n => {
     const r = await fetch('assets/' + n);
@@ -408,7 +408,7 @@ function stosd(di, v) { for (let k = 0; k < 4; k++) vram[(di + k) & 0xFFFF] = (v
 function snow() { for (let i = 0; i < 16000; i++) { stepSeed(); vram32[i] = SEED; } }
 
 async function LoadTitle() {
-  const f = file('freez.tga');
+  const f = file('intro.tga');
   FadeStore.set(f.subarray(0x12, 0x12 + 768));
   buffer.set(f.subarray(0x312, 0x312 + 64000));
   for (let i = 0; i < 256; i++) {
