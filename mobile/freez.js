@@ -200,7 +200,7 @@ const Drops = new Int16Array(800);         // 400 drops: x,y  (first 200 backgro
 let SkyBright = 63, SkyBrightDr = 0, SkyBrightCt = 0, TractionType = 0, frameinc = 0, BonusFrame = 0, HalfFrame = 0, atilecount = 0;
 // Mobile build: jumping keeps its horizontal momentum (inertia); steering in the air is gentle.
 let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
-const AIR_MAX = 2.4, AIR_ACCEL = 0.1, AIR_DRAG = 0.02;
+const AIR_MAX = 1.7, AIR_ACCEL = 0.04, AIR_DRAG = 0.012;
 function airSteer() {
   const L = keys[203] || keys[75], R = keys[205] || keys[77];
   let target = 0;
