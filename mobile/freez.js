@@ -95,31 +95,38 @@ function ps2(n) {                                   // SOUND.C: ps2() queues SFX
   if (!(GameSetup & 1)) return;
   playBuf(SFX[n]);
 }
-// low-key distant thunder (rate limited): a filtered brown-noise rumble with a couple of rolling swells
-let lastThunder = 0, brownBuf = null;
+// distant thunder (rate limited). Pure sub-bass is inaudible on phone/laptop speakers, so the rumble has mid-range body
+// (brown noise sweeping 1.1kHz -> 140Hz) plus saturation, which adds harmonics that small speakers can reproduce.
+let lastThunder = 0, brownBuf = null, satCurve = null;
 function thunder() {
   if (!(GameSetup & 1) || !actx) return;
   const now = performance.now();
-  if (now - lastThunder < 4500 + Math.random() * 5000) return;
+  if (now - lastThunder < 9000 + Math.random() * 9000) return;
   lastThunder = now;
+  if (actx.state === 'suspended') actx.resume();
   if (!brownBuf) {
-    const n = actx.sampleRate * 4, b = actx.createBuffer(1, n, actx.sampleRate), d = b.getChannelData(0);
+    const n = actx.sampleRate * 5, b = actx.createBuffer(1, n, actx.sampleRate), d = b.getChannelData(0);
     let last = 0;
-    for (let i = 0; i < n; i++) { last = (last + (Math.random() * 2 - 1) * .035) / 1.02; d[i] = last * 3.2; }
+    for (let i = 0; i < n; i++) { last = (last + (Math.random() * 2 - 1) * .04) / 1.02; d[i] = last * 3.6; }
     brownBuf = b;
+    satCurve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; satCurve[i] = Math.tanh(x * 3.2); }
   }
-  const t = actx.currentTime + .25 + Math.random() * .9, len = 2.4 + Math.random() * 1.4;
-  const src = actx.createBufferSource(), lp = actx.createBiquadFilter(), g = actx.createGain();
+  const t = actx.currentTime + .2 + Math.random() * .8, len = 3 + Math.random() * 1.5;
+  const src = actx.createBufferSource(), lp = actx.createBiquadFilter(), sat = actx.createWaveShaper(), g = actx.createGain();
   src.buffer = brownBuf;
-  lp.type = 'lowpass'; lp.frequency.setValueAtTime(320, t); lp.frequency.exponentialRampToValueAtTime(70, t + len);
+  lp.type = 'lowpass'; lp.Q.value = .9;
+  lp.frequency.setValueAtTime(1100, t); lp.frequency.exponentialRampToValueAtTime(140, t + len);
+  sat.curve = satCurve;
   g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(.2, t + .12);
-  g.gain.linearRampToValueAtTime(.08, t + .5);
-  g.gain.linearRampToValueAtTime(.17, t + .8 + Math.random() * .3);       // the roll
-  g.gain.linearRampToValueAtTime(.06, t + 1.4);
-  g.gain.exponentialRampToValueAtTime(.0008, t + len);
-  src.connect(lp); lp.connect(g); g.connect(actx.destination);
-  src.start(t, Math.random() * 2); src.stop(t + len + .1);
+  g.gain.linearRampToValueAtTime(.3, t + .08);                       // the crack / first hit
+  g.gain.linearRampToValueAtTime(.12, t + .45);
+  g.gain.linearRampToValueAtTime(.26, t + .8 + Math.random() * .4);   // the roll
+  g.gain.linearRampToValueAtTime(.09, t + 1.7);
+  g.gain.linearRampToValueAtTime(.15, t + 2.0 + Math.random() * .4);   // second, softer roll
+  g.gain.exponentialRampToValueAtTime(.001, t + len);
+  src.connect(lp); lp.connect(sat); sat.connect(g); g.connect(actx.destination);
+  src.start(t, Math.random() * 1.5); src.stop(t + len + .1);
 }
 const SFXFILES = ['23', '26', '21', '6', '7', '4', '2', '8', '18', '25', '11', '19', '3', '50'];
 
