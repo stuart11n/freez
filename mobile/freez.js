@@ -886,9 +886,9 @@ function collani() {
       En.pb(si + 12, En.b(si + 12) & ~4);
       if (!(ax > 319 || ax < -31 || bx > 190 || bx < -31)) {
         psprite32(ax, bx, En.b(si + 7), En.b(si + 8), En.sb(si + 11));
-        EnemySFX.voice(e, En.b(si), En.b(si + 7), En.b(si + 1), En.b(si + 8), ax, bx);
         En.pb(si + 12, En.b(si + 12) | 4);
       }
+      EnemySFX.voice(e, En.b(si), En.b(si + 7), En.b(si + 1), En.b(si + 8), ax, bx);   // audible before they scroll into view
       if (BonusFrame & 2) En.pb(si + 8, (En.b(si + 8) + 1) & 255);
       if (En.b(si + 1) === 0) {
         if (IceBallNo !== 4) {                               // turn to face the ice ball

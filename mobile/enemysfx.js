@@ -1,6 +1,7 @@
 'use strict';
 // Ambient enemy voices (synthesised, nothing to download): birds squawk, the yellow hoppers squish when they land.
 const EnemySFX = (() => {
+  const REACH = 600;                                     // px (the screen is 320 wide): sounds start well before the enemy is visible
   let noise = null, lastBird = 0, lastSquish = 0;
   const cue = new Int16Array(200), lastIdx = new Int8Array(200).fill(-1);
 
@@ -65,16 +66,16 @@ const EnemySFX = (() => {
   function voice(e, ctrl, typ, status, frame, rx, ry) {
     if (status !== 0 || !(GameSetup & 1) || !actx || actx.state !== 'running') return;
     const dx = rx + 16 - 160, dy = ry + 16 - 100, dist = Math.hypot(dx, dy);
-    if (dist > 300) return;
-    const near = 1 - dist / 300, pan = Math.max(-1, Math.min(1, dx / 170)), now = performance.now();
+    if (dist > REACH) return;
+    const near = 1 - dist / REACH, pan = Math.max(-1, Math.min(1, dx / 260)), now = performance.now();
     if (ctrl === 1 && typ === 1) {                         // yellow hopper: squish as it lands (squat frame)
       const idx = frame >> 2;
-      if (idx === 7 && lastIdx[e] !== 7 && now - lastSquish > 130) { lastSquish = now; squish(.34 * near * near + .05, pan); }
+      if (idx === 7 && lastIdx[e] !== 7 && now - lastSquish > 130) { lastSquish = now; squish(.34 * Math.pow(near, 1.6) + .03, pan); }
       lastIdx[e] = idx;
     } else if (ctrl === 2 && typ === 0) {                  // bird: squawks now and then
       if (cue[e] > 0) { cue[e]--; return; }
       cue[e] = 150 + (Math.random() * 260 | 0);
-      if (now - lastBird > 500) { lastBird = now; squawk(.3 * near + .04, pan); }
+      if (now - lastBird > 500) { lastBird = now; squawk(.3 * Math.pow(near, 1.4) + .03, pan); }
     }
   }
   function reset() { cue.fill(0); lastIdx.fill(-1); for (let i = 0; i < 200; i++) cue[i] = (Math.random() * 120) | 0; }
