@@ -20,6 +20,16 @@
   #msg{position:fixed;left:0;right:0;top:46%;text-align:center;pointer-events:none;text-shadow:0 0 6px #000;font-size:18px}
   #fs{all:unset;position:fixed;top:calc(6px + env(safe-area-inset-top));right:calc(6px + env(safe-area-inset-right));width:36px;height:36px;
     text-align:center;line-height:36px;font-size:20px;color:#fff;background:rgba(255,255,255,.12);border-radius:8px;z-index:5}
+  #gear{all:unset;position:fixed;top:calc(6px + env(safe-area-inset-top));right:calc(48px + env(safe-area-inset-right));width:36px;height:36px;
+    text-align:center;line-height:36px;font-size:20px;color:#fff;background:rgba(255,255,255,.12);border-radius:8px;z-index:5}
+  #panel{position:fixed;top:calc(48px + env(safe-area-inset-top));right:calc(6px + env(safe-area-inset-right));display:none;flex-direction:column;gap:6px;
+    padding:8px;background:rgba(10,10,20,.92);border:1px solid rgba(255,255,255,.25);border-radius:10px;z-index:6}
+  #panel.open{display:flex}
+  .opt{all:unset;display:block;min-width:170px;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,.1);color:#fff;font:600 15px system-ui,sans-serif;text-align:left;touch-action:manipulation}
+  .opt:active{background:rgba(255,255,255,.3)}
+  #toast{position:fixed;left:50%;top:calc(54px + env(safe-area-inset-top));transform:translateX(-50%);padding:6px 14px;border-radius:16px;background:rgba(0,0,0,.75);
+    color:#fff;font:600 14px system-ui,sans-serif;opacity:0;transition:opacity .25s;pointer-events:none;z-index:7}
+  #toast.show{opacity:1}
   .mid{display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center}
   .mid .row{display:flex;gap:12px}
   /* portrait: screen on top, controls underneath */
@@ -43,6 +53,8 @@
     #mid .small{--b:38px!important;font-size:10px!important}
   }
   body.desktop .pad,body.desktop #mid,body.desktop #fs{display:none}
+  body.desktop #gear{right:8px}
+  body.desktop #panel{right:8px}
   body.desktop #screen{width:min(100vw,133.33vh);height:min(75vw,100vh);max-width:none;max-height:none}
 </style></head><body>
 <div id="app">
@@ -63,8 +75,20 @@
   </div>
 </div>
 <button id="fs" aria-label="Fullscreen">&#9974;</button>
+<button id="gear" aria-label="Settings">&#9881;</button>
+<div id="panel">
+  <button class="opt" id="opt-crt"></button>
+  <button class="opt" id="opt-scale"></button>
+  <button class="opt" id="opt-music"></button>
+  <button class="opt" id="opt-sfx"></button>
+</div>
+<div id="toast"></div>
 <div id="msg">Loading...</div>
 <script src="tables.js"></script>
+<script src="gfx.js"></script>
+<script src="music.js"></script>
+<script src="ui.js"></script>
+<script src="endings.js"></script>
 <script src="freez.js"></script>
 <script src="touch.js"></script>
 </body></html>

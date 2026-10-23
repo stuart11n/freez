@@ -20,7 +20,6 @@
     btn.addEventListener('pointercancel', up);
     btn.addEventListener('lostpointercapture', up);
   });
-  document.getElementById('crt').addEventListener('pointerdown', e => { e.preventDefault(); toggleScanlines(); });
   for (const ev of ['contextmenu', 'gesturestart', 'dblclick']) document.addEventListener(ev, e => e.preventDefault());
   document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
   const fs = document.getElementById('fs');

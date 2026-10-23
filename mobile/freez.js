@@ -9,63 +9,13 @@
 // ===================================================================================
 const TICK = 1000 / 70;
 const canvas = document.getElementById('screen');
-const ctx = canvas.getContext('2d');
-ctx.imageSmoothingEnabled = true;
-// Mobile build: the 320x200 frame is upscaled with Scale2x (EPX) to 640x400 and stretched to 640x480 (4:3).
-const mid = document.createElement('canvas'); mid.width = 640; mid.height = 400;
-const mctx = mid.getContext('2d');
-const img = mctx.createImageData(640, 400);
-const img32 = new Uint32Array(img.data.buffer);
-const lut = new Uint32Array(256);
-
-// optional retro scanlines: one dark line under each of the 200 original rows (2.4 px apart at 480 high)
-let scanlines = false;
-try { scanlines = localStorage.getItem('freez.scan') === '1'; } catch (e) { }
-const scanOverlay = document.createElement('canvas'); scanOverlay.width = 640; scanOverlay.height = 480;
-{
-  const g = scanOverlay.getContext('2d');
-  g.fillStyle = 'rgba(0,0,0,0.38)';
-  for (let y = 0; y < 200; y++) g.fillRect(0, Math.round(y * 2.4 + 1.4), 640, 1);
-}
-function toggleScanlines() {
-  scanlines = !scanlines;
-  try { localStorage.setItem('freez.scan', scanlines ? '1' : '0'); } catch (e) { }
-  document.body.classList.toggle('crt', scanlines);
-}
-document.body.classList.toggle('crt', scanlines);
-
+Gfx.init(canvas);                          // gfx.js: WebGL scaling + CRT shader (2D fallback)
 const vram = new Uint8Array(65536);       // A000:0000
 const buffer = new Uint8Array(65536);     // off-screen buffer (also the collision map!)
 const dac = new Uint8Array(768);          // VGA DAC, 6 bit components
 
 function setDAC(arr) { dac.set(arr.subarray(0, 768)); }
-
-function present() {
-  for (let i = 0; i < 256; i++) {
-    const r = dac[i * 3] & 63, g = dac[i * 3 + 1] & 63, b = dac[i * 3 + 2] & 63;
-    lut[i] = (255 << 24) | (((b << 2) | (b >> 4)) << 16) | (((g << 2) | (g >> 4)) << 8) | ((r << 2) | (r >> 4));
-  }
-  for (let y = 0; y < 200; y++) {
-    const row = y * 320, up = (y > 0 ? y - 1 : y) * 320, dn = (y < 199 ? y + 1 : y) * 320;
-    const o0 = y * 2 * 640, o1 = o0 + 640;
-    for (let x = 0; x < 320; x++) {
-      const P = vram[row + x];
-      const A = vram[up + x], D = vram[dn + x];
-      const C = vram[row + (x > 0 ? x - 1 : x)], B = vram[row + (x < 319 ? x + 1 : x)];
-      let p1 = P, p2 = P, p3 = P, p4 = P;
-      if (C === A && C !== D && A !== B) p1 = A;
-      if (A === B && A !== C && B !== D) p2 = B;
-      if (D === C && D !== B && C !== A) p3 = C;
-      if (B === D && B !== A && D !== C) p4 = D;
-      const o = x * 2;
-      img32[o0 + o] = lut[p1]; img32[o0 + o + 1] = lut[p2];
-      img32[o1 + o] = lut[p3]; img32[o1 + o + 1] = lut[p4];
-    }
-  }
-  mctx.putImageData(img, 0, 0);
-  ctx.drawImage(mid, 0, 0, 640, 400, 0, 0, 640, 480);
-  if (scanlines) ctx.drawImage(scanOverlay, 0, 0);
-}
+function present() { Gfx.draw(vram, dac); }
 
 let acc = 0, lastT = performance.now(), waiter = null;
 function rafLoop(t) {
@@ -112,7 +62,7 @@ function applyKeys() {
 }
 addEventListener('keydown', e => {
   if (e.code === 'F11' || e.code === 'F12') return;
-  if (e.code === 'F6' && !e.repeat) { e.preventDefault(); toggleScanlines(); return; }
+  if (!e.repeat && (e.code === 'F6' || e.code === 'F7' || e.code === 'F8')) { e.preventDefault(); UI.hotkey(e.code); return; }
   if (CODEMAP[e.code] !== undefined || ALIAS[e.code]) e.preventDefault();
   if (!heldCodes.has(e.code)) pressedAt.set(e.code, performance.now());
   heldCodes.add(e.code); applyKeys(); unlockAudio();
@@ -134,7 +84,7 @@ let actx = null;
 const SFX = [];            // decoded AudioBuffers indexed as in LoadAudio() in CORE.H
 let introBuf = null;
 function unlockAudio() {
-  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } }
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); Music.ready(); } catch (e) { actx = null; } }
   if (actx && actx.state === 'suspended') actx.resume();
 }
 function playBuf(b) {
@@ -516,6 +466,7 @@ const IsAnyKey = () => keys[57] !== 0 || keys[28] !== 0;
 const LEFT = () => keys[203] || keys[75], RIGHT = () => keys[205] || keys[77];
 
 async function MainMenu() {
+  Music.play('menu');
   const boxes = [37810, 37872, 37934, 37996];
   for (;;) {
     let txloop = 0, LastKey = 0;
@@ -1068,8 +1019,16 @@ function collani() {
 // ===================================================================================
 const parity8 = v => { v &= 255; v ^= v >> 4; v ^= v >> 2; v ^= v >> 1; return (~v) & 1; };   // PF set = even parity
 
+const LAST_LEVEL = 1;
+let gameWon = false, gameOverFlag = false;
 async function FinishedLevel() {
   await Fade2Black(0);
+  if (CurrentLevel >= LAST_LEVEL) {                          // the end: show the win screen
+    Music.stop();
+    await Endings.win({ score: Score, lives: Lives, timer: Timer });
+    CurrentLevel++; LastStat = 14; gameWon = true;
+    return;
+  }
   LoadLogo(7);
   SRCopy();
   await FadeFromBlack(0);
@@ -1272,7 +1231,7 @@ async function GameLoop() {
     if (TEnergy === 0) {
       if (LastStat < 13) { LastStat = 13; Frame = 112; }
       if (LastStat === 14) {
-        if (Lives === 0) return 0;
+        if (Lives === 0) { gameOverFlag = true; return 0; }
         await Fade2Black(0);
         Lives--; Energy = 100; TEnergy = 100;
         wposx = Level.sw(lp); wposy = Level.sw(lp + 2);
@@ -1356,6 +1315,7 @@ async function main() {
   document.getElementById('msg').textContent = 'Tap or press any key to start';
   await new Promise(r => { startResolve = r; document.addEventListener('pointerdown', () => { unlockAudio(); if (startResolve) { const s = startResolve; startResolve = null; s(); } }, { once: true }); });
   document.getElementById('msg').textContent = '';
+  UI.init();
   await window.__loadSounds();
   AudioOn = introBuf || SFX.some(Boolean) ? 1 : 0;
 
@@ -1371,12 +1331,9 @@ async function main() {
     if (await MainMenu()) break;                              // quit
     Level.a.set(file('ldata.dat').subarray(0, 4680));
     Score = 0; CurrentLevel = 1; Lives = 3;
+    gameWon = false; gameOverFlag = false;
     for (;;) {                                                // STARTLEVEL
       lp = CurrentLevel * 468;
-      if (CurrentLevel > 1 && Level.w(lp + 8) === 0) {        // no data shipped past level 1: the game is complete
-        await Fade2Black(0);
-        break;
-      }
       TractionType = Level.b(lp + 5);
       await LoadLevel();
       resetDropsInit();
@@ -1387,11 +1344,18 @@ async function main() {
       MCB |= 1; MCB |= 128; MCB &= 239 & 247 & 251;
       Frame = 0; SuperJ = 0; MomLeft = 0; MomRight = 0; JumpStat = 0; LastStat = 0; Energy = 100; TEnergy = 100;
       RapidFire = 0; SteamCount = 0; atilecount = 0;
+      Music.play('level');
       const r = await GameLoop();
-      if (r === 0) { await Fade2Black(0); break; }
+      if (gameWon) break;                                     // win screen already shown
+      if (r === 0) {
+        await Fade2Black(0);
+        if (gameOverFlag) { Music.stop(); await Endings.gameOver({ score: Score }); gameOverFlag = false; }
+        break;
+      }
     }
   }
   saveSetup();
+  Music.stop();
   await Outro();
   document.getElementById('msg').textContent = 'FREEZ (C) Digital Synapse 1996 - press any key to play again';
   await new Promise(r => { startResolve = r; });
