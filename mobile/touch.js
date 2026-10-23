@@ -24,10 +24,24 @@
   for (const ev of ['contextmenu', 'gesturestart', 'dblclick']) document.addEventListener(ev, e => e.preventDefault());
   document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
   const fs = document.getElementById('fs');
-  fs.addEventListener('click', () => {
-    const d = document.documentElement;
-    if (document.fullscreenElement) document.exitFullscreen();
-    else if (d.requestFullscreen) d.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => { })).catch(() => { });
-  });
+  const root = document.documentElement;
+  const isFull = () => document.fullscreenElement || document.webkitFullscreenElement;
+  const toast = t => { const m = document.getElementById('msg'); const old = m.textContent; m.textContent = t; setTimeout(() => { if (m.textContent === t) m.textContent = old === t ? '' : old; }, 3500); };
+  let lastFs = 0;
+  const toggleFs = async e => {
+    e.preventDefault(); e.stopPropagation();
+    if (performance.now() - lastFs < 400) return;       // pointerup + click both fire on some browsers
+    lastFs = performance.now();
+    try {
+      if (isFull()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+      const req = root.requestFullscreen || root.webkitRequestFullscreen;
+      if (!req) { toast('Fullscreen is not supported here - use Share > Add to Home Screen'); return; }
+      await req.call(root, { navigationUI: 'hide' });
+      try { await screen.orientation.lock('landscape'); } catch (err) { }
+    } catch (err) { toast('Fullscreen blocked: ' + (err && err.message || err)); }
+  };
+  fs.addEventListener('pointerup', toggleFs);
+  fs.addEventListener('click', toggleFs);
+  fs.addEventListener('pointerdown', e => e.stopPropagation());
   if (!('ontouchstart' in window) && !navigator.maxTouchPoints) document.body.classList.add('desktop');
 })();
