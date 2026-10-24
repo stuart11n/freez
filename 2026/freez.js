@@ -199,17 +199,20 @@ let wposx = 0, wposy = 0, DXPos = 0, DYPos = 0, DXPos2 = 0, DYPos2 = 0, FYpos = 
 let SkyBright = 63, SkyBrightDr = 0, SkyBrightCt = 0, TractionType = 0, frameinc = 0, BonusFrame = 0, HalfFrame = 0, atilecount = 0;
 // Mobile build: jumping keeps its horizontal momentum (inertia); steering in the air is gentle.
 let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
-// Mobile build: jump again in the air to flap your wings for a small boost (once per airtime)
+// Mobile build: jump again in the air to flap your wings for a small boost (twice per airtime)
 let jumpPrev = false, flapsLeft = 1, flapT = 0;
-const FLAPS_MAX = 1, FLAP_BOOST = 12, FLAP_FRAMES = 22;
-const AIR_MAX = 1.7, AIR_ACCEL = 0.04, AIR_DRAG = 0.012;
+const FLAPS_MAX = 2, FLAP_BOOST = 12, FLAP_FRAMES = 22;
+// In the air: speeding up in the direction you are already moving is quick (as in the original, where momentum kept
+// building mid-jump, so a standing jump can still reach a gap), but braking or turning round is slow (inertia).
+const AIR_RUN = 5, AIR_FWD = 0.2, AIR_BRAKE = 0.04, AIR_DRAG = 0.012, AIR_TAKEOFF = 2;
 function airSteer() {
   const L = keys[203] || keys[75], R = keys[205] || keys[77];
-  let target = 0;
-  if (L && !R) { target = -AIR_MAX; MCB &= 254; } else if (R && !L) { target = AIR_MAX; MCB |= 1; }
-  if (target === 0) airVX += Math.max(-AIR_DRAG, Math.min(AIR_DRAG, -airVX));            // drift, no instant stop
-  else if (!(Math.sign(airVX) === Math.sign(target) && Math.abs(airVX) >= AIR_MAX))     // never slow down a run you are already in
-    airVX += Math.max(-AIR_ACCEL, Math.min(AIR_ACCEL, target - airVX));                  // limited braking/turning
+  const dir = R && !L ? 1 : L && !R ? -1 : 0;
+  if (dir) { if (dir > 0) MCB |= 1; else MCB &= 254; }
+  if (dir === 0) airVX += Math.max(-AIR_DRAG, Math.min(AIR_DRAG, -airVX));              // drift, no instant stop
+  else if (airVX * dir > -0.3) {                                                         // same way (or nearly at rest): speed up
+    if (airVX * dir < AIR_RUN) airVX = Math.min(AIR_RUN, airVX * dir + AIR_FWD) * dir;
+  } else airVX += dir * AIR_BRAKE;                                                       // against the motion: slow to turn
   if (airVX < 0 && (Collision & 12)) airVX = 0;
   if (airVX > 0 && (Collision & 48)) airVX = 0;
   airFrac += airVX;
@@ -1134,7 +1137,12 @@ async function GameLoop() {
     if (TractionType !== 0) dl = HalfFrame;
     const air = !(Collision & 1);
     if (air) {
-      if (!wasAir) { airVX = groundVX; airFrac = 0; wasAir = true; }
+      if (!wasAir) {
+        airVX = groundVX; airFrac = 0; wasAir = true;
+        const L = keys[203] || keys[75], R = keys[205] || keys[77];       // holding a direction as you leave the ground commits to it
+        if (R && !L && airVX > -0.5 && airVX < AIR_TAKEOFF) airVX = AIR_TAKEOFF;
+        else if (L && !R && airVX < 0.5 && airVX > -AIR_TAKEOFF) airVX = -AIR_TAKEOFF;
+      }
       if ((MCB & 4) && HitCount === 35) { if (MomRight === 80) airVX = -4; else if (MomLeft === 80) airVX = 4; MomLeft = MomRight = 0; }
       MCB &= 191;
       airSteer();
