@@ -652,7 +652,7 @@ function skyrain() {
   drawRain(0);
 }
 
-// ---- Birds that burst out of the trees (2026): jump into foliage and 20% of the time a few birds fly out
+// ---- Birds that burst out of the trees (2026): fly behind a tree's front foliage and 20% of the time a few birds fly out
 const flock = [];
 let inTree = false, treeCool = 0;
 const isLeaf = t => (t >= 67 && t <= 81) || (t >= 83 && t <= 85) || (t >= 96 && t <= 103);
@@ -668,8 +668,10 @@ function spawnFlock() {
 function treeCheck() {
   if (treeCool > 0) treeCool--;
   const tx = (wposx + 160) >> 5, ty = (wposy + 100) >> 5;
-  const now = tx >= 0 && tx < 128 && ty >= 0 && ty < 64 && isLeaf(tilemap[ty * 128 + tx] & 127);
-  if (now && !inTree && treeCool === 0 && !(Collision & 1)) {      // entered the foliage while airborne
+  // only the FRONT foliage layer (tile flag bit 7: drawn over the dragon), i.e. flying behind a tree
+  const v = tx >= 0 && tx < 128 && ty >= 0 && ty < 64 ? tilemap[ty * 128 + tx] : 0;
+  const now = (v & 128) !== 0 && isLeaf(v & 127);
+  if (now && !inTree && treeCool === 0 && !(Collision & 1)) {      // slipped behind the foliage while airborne
     treeCool = 210;
     if (Math.random() < 0.2) spawnFlock();
   }
