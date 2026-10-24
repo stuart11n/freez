@@ -4,13 +4,14 @@
 // resolution instead of stretching a fixed 640x480 image.
 
 const Settings = (() => {
-  const s = { crt: 2, scale: 2, music: true, sfx: true };   // crt: 0 off, 1 scanlines, 2 full CRT;  scale: 0 pixel, 1 sharp, 2 smooth
+  const s = { crt: 2, scale: 1, music: true, sfx: true };   // crt: 0 off, 1 scanlines, 2 full CRT;  scale: 0 pixel, 1 smooth
   try { Object.assign(s, JSON.parse(localStorage.getItem('freez.settings') || '{}')); } catch (e) { }
+  if (s.scale > 1) s.scale = 1;                                // old saved Sharp (1) / Smooth (2) both map to Smooth (1)
   s.save = () => { try { localStorage.setItem('freez.settings', JSON.stringify({ crt: s.crt, scale: s.scale, music: s.music, sfx: s.sfx })); } catch (e) { } };
   return s;
 })();
 const CRT_NAMES = ['Off', 'Scanlines', 'Full CRT'];
-const SCALE_NAMES = ['Pixel', 'Sharp', 'Smooth'];
+const SCALE_NAMES = ['Pixel', 'Smooth'];
 
 const Gfx = (() => {
   let canvas, gl = null, ctx2d = null, prog, tex, uRes, uMode, uCrt, uTime;
@@ -43,11 +44,6 @@ void main(){
   vec3 col;
   if(u_mode < .5){
     col = texel(p);
-  } else if(u_mode < 1.5){
-    // sharp bilinear: crisp texel centres, 1 output pixel of blend at the edges
-    vec2 loc = fract(p);
-    vec2 k = clamp(loc*scale, 0., .5) + clamp((loc-1.)*scale + .5, 0., .5);
-    col = texture2D(u_tex, (floor(p)+k)/SRC).rgb;
   } else {
     col = epx(p);
   }

@@ -15,7 +15,7 @@ const UI = (() => {
   }
   const act = {
     crt() { Settings.crt = (Settings.crt + 1) % 3; Settings.save(); refresh(); toast('CRT: ' + CRT_NAMES[Settings.crt]); },
-    scale() { Settings.scale = (Settings.scale + 1) % 3; Settings.save(); refresh(); toast('Scaling: ' + SCALE_NAMES[Settings.scale]); },
+    scale() { Settings.scale = (Settings.scale + 1) % 2; Settings.save(); refresh(); toast('Scaling: ' + SCALE_NAMES[Settings.scale]); },
     music() { Settings.music = !Settings.music; Settings.save(); Music.refresh(); refresh(); toast('Music ' + (Settings.music ? 'on' : 'off')); },
     sfx() { GameSetup ^= 1; saveSetup(); refresh(); toast('Sound FX ' + ((GameSetup & 1) ? 'on' : 'off')); },
   };

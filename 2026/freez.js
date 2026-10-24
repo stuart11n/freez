@@ -202,17 +202,18 @@ let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
 // Mobile build: jump again in the air to flap your wings for a small boost (twice per airtime)
 let jumpPrev = false, flapsLeft = 1, flapT = 0;
 const FLAPS_MAX = 2, FLAP_BOOST = 12, FLAP_FRAMES = 22;
-// In the air: speeding up in the direction you are already moving is quick (as in the original, where momentum kept
-// building mid-jump, so a standing jump can still reach a gap), but braking or turning round is slow (inertia).
-const AIR_RUN = 5, AIR_FWD = 0.2, AIR_BRAKE = 0.04, AIR_DRAG = 0.012, AIR_TAKEOFF = 2;
+// In the air the dragon has wings, so it is steerable but damped: speeding up the way you are already going is quick
+// (as in the original, so jump distance is unchanged), braking/turning round is firm but not instant, and letting go
+// of the keys bleeds the speed off smoothly instead of freezing or sliding on forever.
+const AIR_RUN = 5, AIR_FWD = 0.2, AIR_BRAKE = 0.28, AIR_DAMP = 0.965, AIR_TAKEOFF = 2;
 function airSteer() {
   const L = keys[203] || keys[75], R = keys[205] || keys[77];
   const dir = R && !L ? 1 : L && !R ? -1 : 0;
   if (dir) { if (dir > 0) MCB |= 1; else MCB &= 254; }
-  if (dir === 0) airVX += Math.max(-AIR_DRAG, Math.min(AIR_DRAG, -airVX));              // drift, no instant stop
-  else if (airVX * dir > -0.3) {                                                         // same way (or nearly at rest): speed up
+  if (dir === 0) { airVX *= AIR_DAMP; if (Math.abs(airVX) < 0.02) airVX = 0; }              // damping
+  else if (airVX * dir > -0.3) {                                                           // same way (or nearly at rest): speed up
     if (airVX * dir < AIR_RUN) airVX = Math.min(AIR_RUN, airVX * dir + AIR_FWD) * dir;
-  } else airVX += dir * AIR_BRAKE;                                                       // against the motion: slow to turn
+  } else airVX += dir * AIR_BRAKE;                                                         // against the motion: brake and turn
   if (airVX < 0 && (Collision & 12)) airVX = 0;
   if (airVX > 0 && (Collision & 48)) airVX = 0;
   airFrac += airVX;
@@ -595,11 +596,11 @@ async function Options() {
 // ---- Night storm: day/night level, lightning and two pools of screen-space rain drops --------------------------
 const RAIN_N = 200;
 const rainX = new Float32Array(RAIN_N * 2), rainY = new Float32Array(RAIN_N * 2);   // pool 0 behind the world, pool 1 in front
-let rainPX = 0, rainPY = 0, camDX = 0, camDY = 0;
+let rainPX = 0, rainPY = 0, camDX = 0, camDY = 0, rainI = 0;      // rainI = current rain intensity 0..1
 const bolt = { x: 0, offs: new Float32Array(40), t: 0, since: 999 };
 function resetDropsInit() {
   for (let i = 0; i < RAIN_N * 2; i++) { rainX[i] = Math.random() * 320; rainY[i] = Math.random() * 192; }
-  rainPX = wposx; rainPY = wposy; bolt.t = 0; bolt.since = 999;
+  rainPX = wposx; rainPY = wposy; bolt.t = 0; bolt.since = 999; rainI = 0;
 }
 const dayLevel = () => (SkyBrightDr === 0 ? SkyBright / 63 : 1 - SkyBright / 63);   // 1 = full day, 0 = full night
 const isNight = () => dayLevel() < .5;
@@ -607,13 +608,14 @@ const outdoors = () => wposy + 100 < 1056;      // above tile row 33; the caves,
 const weatherOn = () => (GameSetup & 2) && isNight() && outdoors();
 
 function drawRain(pool) {
-  const base = pool * RAIN_N;
+  const base = pool * RAIN_N, count = Math.round(RAIN_N * rainI);     // fewer drops when it is lighter
   for (let i = 0; i < RAIN_N; i++) {
     const k = base + i;
     // ~7 px down and ~1 px sideways per tick, minus the camera movement so the rain does not slide with the view
     let x = rainX[k] + 1 - camDX, y = rainY[k] + 6.5 + (i % 3) * .5 - camDY;
     x = ((x % 320) + 320) % 320; y = ((y % 192) + 192) % 192;                  // modulo wrap: camera jumps cannot break it
     rainX[k] = x; rainY[k] = y;
+    if (i >= count) continue;
     const xi = x | 0, yi = y | 0, col = 96 + ((i + pool * 3) & 7);              // colours 96-103 cycle each tick, so the rain shimmers
     for (let n = 0; n < 3; n++) if (yi + n < 191) buffer[(yi + n) * 320 + xi] = col;
   }
@@ -633,10 +635,14 @@ function skyrain() {
   }
   camDX = s16(wposx - rainPX); camDY = s16(wposy - rainPY); rainPX = wposx; rainPY = wposy;
   bolt.since++;
-  if (!weatherOn()) { bolt.t = 0; return; }
+  // the rain eases in when the storm starts, drifts between drizzle and downpour, and eases out when it ends
+  const stormOn = weatherOn();
+  const target = stormOn ? 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(frameinc * 0.0021 + 1.7 * Math.sin(frameinc * 0.00053))) : 0;
+  rainI += (target - rainI) * (stormOn ? 0.006 : 0.012);
+  if (!stormOn && rainI < 0.01) { rainI = 0; bolt.t = 0; return; }          // fully faded out (never zero it while easing in)
   // --- lightning: ~0.5% chance per tick, at least 1 s apart; 40 segments of 5 px, 2 px wide, pure white, visible 5 ticks
   if (bolt.t > 0) bolt.t--;
-  else if (bolt.since > 70 && Math.random() < .005) {
+  else if (stormOn && rainI > 0.35 && bolt.since > 70 && Math.random() < .005) {
     bolt.x = 32 + Math.random() * 256;
     for (let i = 0; i < 40; i++) bolt.offs[i] = Math.random() * 9 - 4.5;
     bolt.t = 5; bolt.since = 0;
@@ -644,6 +650,40 @@ function skyrain() {
   }
   if (bolt.t > 0) { let x = bolt.x; for (let i = 0; i < 40; i++) { const nx = x + bolt.offs[i]; Line(Math.round(x), i * 5, Math.round(nx), i * 5 + 5); x = nx; } }
   drawRain(0);
+}
+
+// ---- Birds that burst out of the trees (2026): jump into foliage and 20% of the time a few birds fly out
+const flock = [];
+let inTree = false, treeCool = 0;
+const isLeaf = t => (t >= 67 && t <= 81) || (t >= 83 && t <= 85) || (t >= 96 && t <= 103);
+function spawnFlock() {
+  const n = 2 + (Math.random() * 3 | 0), cx = wposx + 160, cy = wposy + 96;
+  for (let i = 0; i < n; i++) {
+    const dir = Math.random() < .5 ? -1 : 1;
+    flock.push({ x: cx + (Math.random() * 60 - 30), y: cy + (Math.random() * 30 - 20), vx: dir * (1.6 + Math.random() * 1.6), vy: -(0.9 + Math.random() * 0.8),
+      frame: (Math.random() * 32) | 0, delay: (Math.random() * 16) | 0, life: 260 });
+    if (typeof EnemySFX !== 'undefined' && actx && actx.state === 'running' && (GameSetup & 1)) setTimeout(() => EnemySFX.squawk(.22, Math.max(-1, Math.min(1, dir * .5))), 60 + i * 110);
+  }
+}
+function treeCheck() {
+  if (treeCool > 0) treeCool--;
+  const tx = (wposx + 160) >> 5, ty = (wposy + 100) >> 5;
+  const now = tx >= 0 && tx < 128 && ty >= 0 && ty < 64 && isLeaf(tilemap[ty * 128 + tx] & 127);
+  if (now && !inTree && treeCool === 0 && !(Collision & 1)) {      // entered the foliage while airborne
+    treeCool = 210;
+    if (Math.random() < 0.2) spawnFlock();
+  }
+  inTree = now;
+}
+function drawFlock() {
+  for (let i = flock.length - 1; i >= 0; i--) {
+    const b = flock[i];
+    if (b.delay > 0) { b.delay--; continue; }
+    b.x += b.vx; b.y += b.vy; b.vy = b.vy * .99 - .002; b.frame = (b.frame + 2) & 31;
+    const sx = Math.round(b.x - wposx - 16), sy = Math.round(b.y - wposy - 16);
+    if (--b.life <= 0 || sx < -80 || sx > 400 || sy < -80) { flock.splice(i, 1); continue; }
+    if (sy < 191) psprite32(sx, sy, 0, b.frame, b.vx);
+  }
 }
 
 // SKYPLOT.H: parallax sky tiles
@@ -808,7 +848,7 @@ function flndrain() {
     dx += 32; ti += 117;
   }
   FTileIndex = ti;
-  if (weatherOn()) drawRain(1);
+  if (rainI > 0.01) drawRain(1);
 }
 
 // COLLANI.H: bonuses, enemies, platforms, ice balls
@@ -825,7 +865,8 @@ function collani() {
     const dx = s16(Bn.w(si + 3) - wposy);
     if (dx < -16 || dx > 192) continue;
     if (bl >= 128) { psprite16(ax, dx, 14, (bl - 224) & 255); continue; }
-    psprite16(ax, dx, bl, ((cx & 255) + BonusFrame) & 31);
+    const bounce = bl === 2 ? Math.round(Math.abs(Math.sin(frameinc * 0.11 + (cx >> 4))) * 4) : 0;   // coins hop up to 4 px
+    psprite16(ax, dx - bounce, bl, ((cx & 255) + BonusFrame) & 31);
     if (ax > 169 || ax < 136 || dx > 108 || dx < 76) continue;
     let snd = -1;
     switch (bl) {
@@ -1090,7 +1131,7 @@ async function GameLoop() {
     if (keys[20]) Timer = 1500;
     if (keys[30]) SteamCount = 8;
 
-    skyrain(); skyplot(); bridges(); backplot(); tileanim(); statbar(); collani();
+    skyrain(); skyplot(); bridges(); backplot(); tileanim(); statbar(); collani(); treeCheck(); drawFlock();
 
     // ---- Gravity
     let di = 32160, ah = 0;
@@ -1419,7 +1460,7 @@ async function main() {
       MCB |= 1; MCB |= 128; MCB &= 239 & 247 & 251;
       Frame = 0; SuperJ = 0; MomLeft = 0; MomRight = 0; JumpStat = 0; LastStat = 0; Energy = 100; TEnergy = 100;
       RapidFire = 0; SteamCount = 0; atilecount = 0;
-      airVX = groundVX = airFrac = 0; wasAir = false; jumpPrev = false; flapsLeft = FLAPS_MAX; flapT = 0; EnemySFX.reset();
+      airVX = groundVX = airFrac = 0; wasAir = false; jumpPrev = false; flapsLeft = FLAPS_MAX; flapT = 0; flock.length = 0; inTree = false; EnemySFX.reset();
       Music.play('level');
       const r = await GameLoop();
       if (gameWon) break;                                     // win screen already shown
