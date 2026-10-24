@@ -11,10 +11,13 @@ const EnemySFX = (() => {
     for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
     return (noise = b);
   }
-  function out(pan, vol) {
+  function out(pan, vol, life) {
     const g = actx.createGain(); g.gain.value = vol;
-    if (actx.createStereoPanner) { const p = actx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(actx.destination); }
+    let tail = g;
+    if (actx.createStereoPanner) { const p = actx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(actx.destination); tail = p; }
     else g.connect(actx.destination);
+    // disconnect after the cue ends so gain/panner nodes do not accumulate across a long session
+    setTimeout(() => { try { g.disconnect(); if (tail !== g) tail.disconnect(); } catch (e) { } }, Math.ceil((life || 0.4) * 1000) + 50);
     return g;
   }
   function env(g, t, a, hold, rel, peak) {
@@ -26,7 +29,7 @@ const EnemySFX = (() => {
 
   // "ka-RAWK": two harsh falling chirps with a fast wobble, formant-filtered, plus a little breath noise
   function squawk(vol, pan) {
-    const t0 = actx.currentTime + .005, base = 780 + Math.random() * 260, o = out(pan, vol);
+    const t0 = actx.currentTime + .005, base = 780 + Math.random() * 260, o = out(pan, vol, 0.45);
     [[0, 1.0], [.14, 1.35]].forEach(([dt, k]) => {
       const t = t0 + dt, osc = actx.createOscillator(), lfo = actx.createOscillator(), lg = actx.createGain();
       const bp = actx.createBiquadFilter(), g = actx.createGain();
@@ -47,7 +50,7 @@ const EnemySFX = (() => {
 
   // "sp-lurp": a wet pitch bend (up then down) with a resonant noise burst
   function squish(vol, pan) {
-    const t = actx.currentTime + .005, o = out(pan, vol);
+    const t = actx.currentTime + .005, o = out(pan, vol, 0.35);
     const osc = actx.createOscillator(), g = actx.createGain();
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(95, t);

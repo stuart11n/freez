@@ -178,7 +178,6 @@ ground(13, HALL_F, 64, 1)
 for r in range(HALL_F, BOT_H + 1):
     put(7, r, 0); put(8, r, 0)
 put(9, HALL_F, CORNER_R); put(6, HALL_F, CORNER_L)
-put(6, HALL_F, FLOOR)
 for r in range(HALL_F + 1, BOT_H + 1):
     put(9, r, DIRT)
 bonus(7, 11 * 32, 35 * 32)                                     # time bonus before the drop

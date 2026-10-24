@@ -4,17 +4,18 @@
 // resolution instead of stretching a fixed 640x480 image.
 
 const Settings = (() => {
-  const s = { crt: 2, scale: 1, music: true, sfx: true };   // crt: 0 off, 1 scanlines, 2 full CRT;  scale: 0 pixel, 1 smooth
+  const s = { crt: 2, scale: 1, music: true };   // crt: 0 off, 1 scanlines, 2 full CRT;  scale: 0 pixel, 1 smooth (SFX lives in GameSetup bit 0)
   try { Object.assign(s, JSON.parse(localStorage.getItem('freez.settings') || '{}')); } catch (e) { }
   if (s.scale > 1) s.scale = 1;                                // old saved Sharp (1) / Smooth (2) both map to Smooth (1)
-  s.save = () => { try { localStorage.setItem('freez.settings', JSON.stringify({ crt: s.crt, scale: s.scale, music: s.music, sfx: s.sfx })); } catch (e) { } };
+  delete s.sfx;                                                // was saved but never read; GameSetup & 1 is the real SFX flag
+  s.save = () => { try { localStorage.setItem('freez.settings', JSON.stringify({ crt: s.crt, scale: s.scale, music: s.music })); } catch (e) { } };
   return s;
 })();
 const CRT_NAMES = ['Off', 'Scanlines', 'Full CRT'];
 const SCALE_NAMES = ['Pixel', 'Smooth'];
 
 const Gfx = (() => {
-  let canvas, gl = null, ctx2d = null, prog, tex, uRes, uMode, uCrt, uTime;
+  let canvas, gl = null, ctx2d = null, prog, tex, uRes, uMode, uCrt, uTime, uHurt;
   const px = new Uint8Array(320 * 200 * 4);
   const px32 = new Uint32Array(px.buffer);
   const lut = new Uint32Array(256);
@@ -23,7 +24,7 @@ const Gfx = (() => {
   const VS = `attribute vec2 a; varying vec2 v_uv; void main(){ v_uv = a*.5+.5; v_uv.y = 1.-v_uv.y; gl_Position = vec4(a,0.,1.); }`;
   const FS = `
 precision highp float;
-uniform sampler2D u_tex; uniform vec2 u_res; uniform float u_mode; uniform float u_crt; uniform float u_time;
+uniform sampler2D u_tex; uniform vec2 u_res; uniform float u_mode; uniform float u_crt; uniform float u_time; uniform float u_hurt;
 varying vec2 v_uv;
 const vec2 SRC = vec2(320.,200.);
 vec3 texel(vec2 t){ return texture2D(u_tex, (floor(t)+.5)/SRC).rgb; }
@@ -75,6 +76,14 @@ void main(){
       col *= 1.08;
     }
   }
+  // low health (u_hurt 0..1): desaturate to grey and tighten vignette so the clear view shrinks to 50% at death
+  if(u_hurt > 0.001){
+    float grey = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(col, vec3(grey), u_hurt);
+    vec2 hq = (v_uv * 2. - 1.) * vec2(1., SRC.y / SRC.x);
+    float aperture = mix(1.45, 0.5, u_hurt);
+    col *= 1.0 - smoothstep(aperture * 0.72, aperture, length(hq));
+  }
   gl_FragColor = vec4(col, 1.);
 }`;
 
@@ -107,6 +116,7 @@ void main(){
     gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
     uRes = gl.getUniformLocation(prog, 'u_res'); uMode = gl.getUniformLocation(prog, 'u_mode');
     uCrt = gl.getUniformLocation(prog, 'u_crt'); uTime = gl.getUniformLocation(prog, 'u_time');
+    uHurt = gl.getUniformLocation(prog, 'u_hurt');
     return true;
   }
   function resize() {
@@ -129,7 +139,8 @@ void main(){
     new ResizeObserver(resize).observe(canvas);
     addEventListener('resize', resize);
   }
-  function draw(vram, dac) {
+  function draw(vram, dac, hurt) {
+    const hAmt = Math.max(0, Math.min(1, hurt || 0));
     for (let i = 0; i < 256; i++) {
       const r = dac[i * 3] & 63, g = dac[i * 3 + 1] & 63, b = dac[i * 3 + 2] & 63;
       lut[i] = (255 << 24) | (((b << 2) | (b >> 4)) << 16) | (((g << 2) | (g >> 4)) << 8) | ((r << 2) | (r >> 4));
@@ -142,15 +153,27 @@ void main(){
       gl.uniform1f(uMode, Settings.scale);
       gl.uniform1f(uCrt, Settings.crt);
       gl.uniform1f(uTime, performance.now() / 1000);
+      gl.uniform1f(uHurt, hAmt);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else {
       lowImg.data.set(px); lowCtx.putImageData(lowImg, 0, 0);
       ctx2d.imageSmoothingEnabled = Settings.scale !== 0;
+      ctx2d.filter = hAmt > 0.001 ? ('saturate(' + (1 - hAmt) + ')') : 'none';
       ctx2d.drawImage(lowCanvas, 0, 0, w, h);
+      ctx2d.filter = 'none';
       if (Settings.crt) {
         ctx2d.fillStyle = Settings.crt > 1 ? 'rgba(0,0,0,.45)' : 'rgba(0,0,0,.3)';
         const rowH = h / 200;
         for (let y = 0; y < 200; y++) ctx2d.fillRect(0, y * rowH + rowH * .62, w, Math.max(1, rowH * .38));
+      }
+      if (hAmt > 0.001) {
+        const aperture = (1.45 * (1 - hAmt) + 0.5 * hAmt) * 0.5;   // radius as fraction of min(w,h)
+        const R = Math.min(w, h) * aperture;
+        const g = ctx2d.createRadialGradient(w / 2, h / 2, R * 0.72, w / 2, h / 2, R);
+        g.addColorStop(0, 'rgba(0,0,0,0)');
+        g.addColorStop(1, 'rgba(0,0,0,1)');
+        ctx2d.fillStyle = g;
+        ctx2d.fillRect(0, 0, w, h);
       }
     }
   }

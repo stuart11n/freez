@@ -15,7 +15,12 @@ const buffer = new Uint8Array(65536);     // off-screen buffer (also the collisi
 const dac = new Uint8Array(768);          // VGA DAC, 6 bit components
 
 function setDAC(arr) { dac.set(arr.subarray(0, 768)); }
-function present() { Gfx.draw(vram, dac); }
+let gameActive = false;
+// Below 10% energy: hurt 0→1 as Energy 10→0 (full desat + view shrunk to 50% at death). Off outside gameplay.
+function present() {
+  const hurt = (gameActive && Energy < 10) ? (10 - Energy) / 10 : 0;
+  Gfx.draw(vram, dac, hurt);
+}
 
 let acc = 0, lastT = performance.now(), waiter = null;
 function rafLoop(t) {
@@ -127,6 +132,7 @@ function thunder() {
   g.gain.exponentialRampToValueAtTime(.001, t + len);
   src.connect(lp); lp.connect(sat); sat.connect(g); g.connect(actx.destination);
   src.start(t, Math.random() * 1.5); src.stop(t + len + .1);
+  src.onended = () => { try { src.disconnect(); lp.disconnect(); sat.disconnect(); g.disconnect(); } catch (e) { } };
 }
 const SFXFILES = ['23', '26', '21', '6', '7', '4', '2', '8', '18', '25', '11', '19', '3', '50'];
 
@@ -202,9 +208,10 @@ let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
 // Damage motion is much gentler than the original (acid bounce 15 -> 9, hit hop 10 -> 6, push momentum 80 -> 40,
 // airborne push 4 -> 2.4 px/frame).
 const ACID_JUMP = 9, HIT_JUMP = 6, KNOCK_MOM = 40, KNOCK_V = 2.4;
+let pendingKnock = 0;   // ±KNOCK_V applied on the first airborne frame after a hit (HitCount is already 34 by then)
 // Mobile build: jump again in the air to flap your wings for a small boost (twice per airtime)
-let jumpPrev = false, flapsLeft = 1, flapT = 0;
 const FLAPS_MAX = 2, FLAP_BOOST = 12, FLAP_FRAMES = 22;
+let jumpPrev = false, flapsLeft = FLAPS_MAX, flapT = 0;
 // In the air the dragon has wings, so it is steerable but damped: speeding up the way you are already going is quick
 // (as in the original, so jump distance is unchanged), braking/turning round is firm but not instant, and letting go
 // of the keys bleeds the speed off smoothly instead of freezing or sliding on forever.
@@ -873,8 +880,9 @@ function collani() {
     if (dx < -16 || dx > 192) continue;
     if (bl >= 128) { psprite16(ax, dx, 14, (bl - 224) & 255); continue; }
     const bounce = bl === 2 ? Math.round(Math.abs(Math.sin(frameinc * 0.11 + (cx >> 4))) * 4) : 0;   // coins hop up to 4 px
-    psprite16(ax, dx - bounce, bl, ((cx & 255) + BonusFrame) & 31);
-    if (ax > 169 || ax < 136 || dx > 108 || dx < 76) continue;
+    const dy = dx - bounce;
+    psprite16(ax, dy, bl, ((cx & 255) + BonusFrame) & 31);
+    if (ax > 169 || ax < 136 || dy > 108 || dy < 76) continue;
     let snd = -1;
     switch (bl) {
       case 1: Score += 150; snd = 1; break;
@@ -1008,8 +1016,8 @@ function collani() {
         if (En.b(si + 1) !== 0) break enddetect;
         Energy = Energy <= 4 ? 0 : Energy - 5;
         JumpStat = HIT_JUMP; MCB |= 12; HitCount = 35;
-        if (En.sb(si + 11) < 0) { MomLeft = KNOCK_MOM; MCB &= 254; }
-        else { MomRight = KNOCK_MOM; MCB |= 1; }
+        if (En.sb(si + 11) < 0) { MomLeft = KNOCK_MOM; MCB &= 254; pendingKnock = KNOCK_V; }
+        else { MomRight = KNOCK_MOM; MCB |= 1; pendingKnock = -KNOCK_V; }
       }
       const st = En.b(si + 1);
       if (st === 0 || st === 6 || JumpStat !== 0) break donee;
@@ -1124,7 +1132,9 @@ async function FinishedLevel() {
 
 // returns 0 = quit / no lives, 1 = level completed
 async function GameLoop() {
+  gameActive = true;
   DXPos = wposx; DYPos = wposy;
+  try {
   for (;;) {
     for (const [k, bit] of [[59, 1], [60, 2], [61, 4], [62, 8], [63, 16]]) {
       if (keys[k]) {
@@ -1138,7 +1148,7 @@ async function GameLoop() {
     if (keys[20]) Timer = 1500;
     if (keys[30]) SteamCount = 8;
 
-    skyrain(); skyplot(); bridges(); backplot(); tileanim(); statbar(); collani(); treeCheck(); drawFlock();
+    skyrain(); skyplot(); bridges(); backplot(); tileanim(); statbar(); collani(); drawFlock();
 
     // ---- Gravity
     let di = 32160, ah = 0;
@@ -1158,6 +1168,7 @@ async function GameLoop() {
 
     // ---- Plot main character
     Collision = pmain(MCB, Frame);
+    treeCheck();                                              // after pmain so Collision & 1 is current
     if (!(LastStat === 12 || (MCB & 4) || Firing === 0)) {
       let ax, bx, f;
       if (!(MCB & 1)) { ax = 144; bx = 84; if (!(Collision & 1)) { bx = 86; ax = 142; } if (MCB & 8) { bx = 84; ax = 142; } f = 8; }
@@ -1191,11 +1202,11 @@ async function GameLoop() {
         if (R && !L && airVX > -0.5 && airVX < AIR_TAKEOFF) airVX = AIR_TAKEOFF;
         else if (L && !R && airVX < 0.5 && airVX > -AIR_TAKEOFF) airVX = -AIR_TAKEOFF;
       }
-      if ((MCB & 4) && HitCount === 35) { if (MomRight === KNOCK_MOM) airVX = -KNOCK_V; else if (MomLeft === KNOCK_MOM) airVX = KNOCK_V; MomLeft = MomRight = 0; }
+      if (pendingKnock) { airVX = pendingKnock; MomLeft = MomRight = 0; pendingKnock = 0; }
       MCB &= 191;
       airSteer();
     } else {
-      if (wasAir) { landMomentum(); wasAir = false; }
+      if (wasAir) { landMomentum(); wasAir = false; pendingKnock = 0; }
       const x0 = wposx;
       left: {
         if (!(al === 1 || keys[203])) break left;
@@ -1250,7 +1261,7 @@ async function GameLoop() {
     {
       const jk = !!keys[29];
       if (Collision & 1) flapsLeft = FLAPS_MAX;
-      else if (jk && !jumpPrev && flapsLeft > 0 && !(MCB & 4) && LastStat < 13) {
+      else if (jk && !jumpPrev && flapsLeft > 0 && !(MCB & 4) && !(Collision & 2) && LastStat < 13) {
         flapsLeft--; JumpStat = FLAP_BOOST; MCB |= 8; MCB &= 239; GravStat = 64; flapT = FLAP_FRAMES; ps2(13);
       }
       jumpPrev = jk;
@@ -1270,7 +1281,8 @@ async function GameLoop() {
       JumpStat = (JumpStat - 1) & 255;
       wposy = s16(wposy - (JumpStat < 5 ? JumpStat : 8));
       if (JumpStat === 0) MCB &= 247;
-      if (Collision & 2) { JumpStat = Math.min(JumpStat, 3); MCB &= 239; GravStat = 40; }     // soft bump: glide the last few px, ease into the fall
+      // soft bump: stop ascending (as original) but ease into the fall with a gentler GravStat
+      if (Collision & 2) { JumpStat = 0; MCB &= 247 & 239; GravStat = 40; falling = true; }
     }
     // ---- Main character frame control
     anim: {
@@ -1393,7 +1405,7 @@ async function GameLoop() {
     if (LastStat === 14) {
       LastStat = 2; MomLeft = 0; MomRight = 0; SteamCount = 0; Frame = 0;
       TScore = Score; TTimer = Timer; TEnergy = Energy;
-      MCB |= 129; MCB &= 247 & 251; airVX = groundVX = airFrac = 0; wasAir = false; flapT = 0; flapsLeft = FLAPS_MAX;
+      MCB |= 129; MCB &= 247 & 251; airVX = groundVX = airFrac = 0; wasAir = false; flapT = 0; flapsLeft = FLAPS_MAX; pendingKnock = 0;
       if (Level.b(lp + 4) === 1) MCB |= 1; else MCB &= 254;
     }
     // ---- Random steam
@@ -1402,6 +1414,9 @@ async function GameLoop() {
 
     HalfFrame = parity8((frameinc + 1) & 255);
     frameinc = (frameinc + 1) & 0xFFFF;
+  }
+  } finally {
+    gameActive = false;
   }
 }
 
@@ -1436,9 +1451,9 @@ async function main() {
   await loadAssets();
   // wait for a key press: browsers only allow audio after a user gesture
   document.getElementById('msg').textContent = 'Tap or press any key to start';
+  UI.init();                                                  // gear / CRT / hotkeys work on the tap-to-start screen too
   await new Promise(r => { startResolve = r; document.addEventListener('pointerdown', () => { unlockAudio(); if (startResolve) { const s = startResolve; startResolve = null; s(); } }, { once: true }); });
   document.getElementById('msg').textContent = '';
-  UI.init();
   await window.__loadSounds();
   AudioOn = introBuf || SFX.some(Boolean) ? 1 : 0;
 
@@ -1459,15 +1474,15 @@ async function main() {
       lp = CurrentLevel * 468;
       TractionType = Level.b(lp + 5);
       await LoadLevel();
-      resetDropsInit();
       wposx = Level.sw(lp); wposy = Level.sw(lp + 2);
+      resetDropsInit();                                       // after spawn so rain camera matches wpos
       Timer = TTimer = Level.w(lp + 8);
       TScore = Score;
       SkyBright = 63; SkyBrightDr = 0; SkyBrightCt = 0;
       MCB |= 1; MCB |= 128; MCB &= 239 & 247 & 251;
       Frame = 0; SuperJ = 0; MomLeft = 0; MomRight = 0; JumpStat = 0; LastStat = 0; Energy = 100; TEnergy = 100;
       RapidFire = 0; SteamCount = 0; atilecount = 0;
-      airVX = groundVX = airFrac = 0; wasAir = false; jumpPrev = false; flapsLeft = FLAPS_MAX; flapT = 0; flock.length = 0; inTree = false; EnemySFX.reset();
+      airVX = groundVX = airFrac = 0; wasAir = false; jumpPrev = false; flapsLeft = FLAPS_MAX; flapT = 0; pendingKnock = 0; flock.length = 0; inTree = false; EnemySFX.reset();
       Music.play('level');
       const r = await GameLoop();
       if (gameWon) break;                                     // win screen already shown
