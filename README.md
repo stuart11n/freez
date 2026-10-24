@@ -4,6 +4,14 @@ Browser port of FREEZ (c) Digital Synapse 1996, a DOS platformer originally writ
 This is a direct JavaScript translation of the source (no emulator): VGA mode 13h is a canvas, the DAC palette and
 retrace waits are emulated at 70Hz, and the asm routines are rewritten function by function.
 
+Play it: [s16n.com/projects/freez](https://www.s16n.com/projects/freez/)
+
+![FREEZ gameplay in Misty Valley](screenshots/gameplay.png)
+
+![The FREEZ main menu](screenshots/menu.png)
+
+![Running through Misty Valley](screenshots/action.png)
+
 ## Run
 
 Serve this folder with any static HTTP server and open `index.html`:
