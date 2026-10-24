@@ -57,3 +57,4 @@ effect (CRT button, or F6 on a keyboard). Serve the repo and open `2026/index.ht
 - **Coins** bounce a little in place.
 - **Rain** eases in and out and varies between drizzle and downpour while the storm lasts.
 - **Tree birds:** fly behind a tree's front foliage and 20% of the time a few small blue birds (drawn in code, half size) burst out of it, with squawks.
+- **Gentler bumps and hits:** hitting a ceiling glides the last few pixels and eases into the fall instead of stopping dead, and damage knockback (enemy hits and acid) is roughly a third of the original.

@@ -199,6 +199,9 @@ let wposx = 0, wposy = 0, DXPos = 0, DYPos = 0, DXPos2 = 0, DYPos2 = 0, FYpos = 
 let SkyBright = 63, SkyBrightDr = 0, SkyBrightCt = 0, TractionType = 0, frameinc = 0, BonusFrame = 0, HalfFrame = 0, atilecount = 0;
 // Mobile build: jumping keeps its horizontal momentum (inertia); steering in the air is gentle.
 let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
+// Damage motion is much gentler than the original (acid bounce 15 -> 9, hit hop 10 -> 6, push momentum 80 -> 40,
+// airborne push 4 -> 2.4 px/frame).
+const ACID_JUMP = 9, HIT_JUMP = 6, KNOCK_MOM = 40, KNOCK_V = 2.4;
 // Mobile build: jump again in the air to flap your wings for a small boost (twice per airtime)
 let jumpPrev = false, flapsLeft = 1, flapT = 0;
 const FLAPS_MAX = 2, FLAP_BOOST = 12, FLAP_FRAMES = 22;
@@ -994,7 +997,7 @@ function collani() {
       if (bx <= 76 || bx >= 124) break donee;
       enddetect: {
         if (ctrl === 3) {                                     // acid
-          JumpStat = 15; MCB |= 12;
+          JumpStat = ACID_JUMP; MCB |= 12;
           Energy = Energy <= 24 ? 0 : Energy - 25;
           break enddetect;
         }
@@ -1004,9 +1007,9 @@ function collani() {
         }
         if (En.b(si + 1) !== 0) break enddetect;
         Energy = Energy <= 4 ? 0 : Energy - 5;
-        JumpStat = 10; MCB |= 12; HitCount = 35;
-        if (En.sb(si + 11) < 0) { MomLeft = 80; MCB &= 254; }
-        else { MomRight = 80; MCB |= 1; }
+        JumpStat = HIT_JUMP; MCB |= 12; HitCount = 35;
+        if (En.sb(si + 11) < 0) { MomLeft = KNOCK_MOM; MCB &= 254; }
+        else { MomRight = KNOCK_MOM; MCB |= 1; }
       }
       const st = En.b(si + 1);
       if (st === 0 || st === 6 || JumpStat !== 0) break donee;
@@ -1188,7 +1191,7 @@ async function GameLoop() {
         if (R && !L && airVX > -0.5 && airVX < AIR_TAKEOFF) airVX = AIR_TAKEOFF;
         else if (L && !R && airVX < 0.5 && airVX > -AIR_TAKEOFF) airVX = -AIR_TAKEOFF;
       }
-      if ((MCB & 4) && HitCount === 35) { if (MomRight === 80) airVX = -4; else if (MomLeft === 80) airVX = 4; MomLeft = MomRight = 0; }
+      if ((MCB & 4) && HitCount === 35) { if (MomRight === KNOCK_MOM) airVX = -KNOCK_V; else if (MomLeft === KNOCK_MOM) airVX = KNOCK_V; MomLeft = MomRight = 0; }
       MCB &= 191;
       airSteer();
     } else {
@@ -1267,7 +1270,7 @@ async function GameLoop() {
       JumpStat = (JumpStat - 1) & 255;
       wposy = s16(wposy - (JumpStat < 5 ? JumpStat : 8));
       if (JumpStat === 0) MCB &= 247;
-      if (Collision & 2) { JumpStat = 0; MCB &= 247 & 239; GravStat = 64; falling = true; }
+      if (Collision & 2) { JumpStat = Math.min(JumpStat, 3); MCB &= 239; GravStat = 40; }     // soft bump: glide the last few px, ease into the fall
     }
     // ---- Main character frame control
     anim: {
