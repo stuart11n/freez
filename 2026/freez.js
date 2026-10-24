@@ -677,14 +677,16 @@ function treeCheck() {
   }
   inTree = now;
 }
+let birdSpr = null;                                              // the small blue bird (birdsprite.js), built on first use
 function drawFlock() {
+  if (flock.length && !birdSpr) birdSpr = BIRD.build(palMain);
   for (let i = flock.length - 1; i >= 0; i--) {
     const b = flock[i];
     if (b.delay > 0) { b.delay--; continue; }
-    b.x += b.vx; b.y += b.vy; b.vy = b.vy * .99 - .002; b.frame = (b.frame + 2) & 31;
-    const sx = Math.round(b.x - wposx - 16), sy = Math.round(b.y - wposy - 16);
+    b.x += b.vx; b.y += b.vy; b.vy = b.vy * .99 - .002; b.frame = (b.frame + 1) & 255;
+    const sx = Math.round(b.x - wposx - birdSpr.w / 2), sy = Math.round(b.y - wposy - birdSpr.h / 2);
     if (--b.life <= 0 || sx < -80 || sx > 400 || sy < -80) { flock.splice(i, 1); continue; }
-    if (sy < 191) psprite32(sx, sy, 0, b.frame, b.vx);
+    if (sy < 191) spriteT(birdSpr.data, (b.frame & 7) * birdSpr.w * birdSpr.h, birdSpr.w, birdSpr.h, sx, sy, b.vx < 0, 192);
   }
 }
 
