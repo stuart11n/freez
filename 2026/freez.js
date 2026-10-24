@@ -196,7 +196,6 @@ let MCB = 0, Collision = 0, Firing = 0, Frame = 0, MomLeft = 0, MomRight = 0, Ju
 let Lives = 0, Energy = 0, Timer = 0, Score = 0, TTimer = 0, TEnergy = 0, TScore = 0, LevelEnd = 0, HitCount = 0, IceBallNo = 4;
 let RapidFire = 0, SuperJ = 0, SteamCount = 0, lp = 0;
 let wposx = 0, wposy = 0, DXPos = 0, DYPos = 0, DXPos2 = 0, DYPos2 = 0, FYpos = 0, TileX = 0, FTileX = 0, TileIndex = 0, FTileIndex = 0;
-const Drops = new Int16Array(800);         // 400 drops: x,y  (first 200 background, last 200 foreground)
 let SkyBright = 63, SkyBrightDr = 0, SkyBrightCt = 0, TractionType = 0, frameinc = 0, BonusFrame = 0, HalfFrame = 0, atilecount = 0;
 // Mobile build: jumping keeps its horizontal momentum (inertia); steering in the air is gentle.
 let airVX = 0, airFrac = 0, wasAir = false, groundVX = 0;
@@ -222,7 +221,6 @@ function landMomentum() {
   const a = Math.abs(airVX), m = a >= 3.5 ? 35 : a >= 1.5 ? 20 : a > 0.3 ? 10 : 0;
   if (airVX < 0) { MomRight = m; MomLeft = 0; } else { MomLeft = m; MomRight = 0; }
 }
-const DROPBASE = 0x1234;                   // stands in for OFFSET Drops (only used for colour jitter)
 
 // ===================================================================================
 // Core graphics (TILE.CPP, ENEMY.CPP, BONUS.CPP, PBRIDGE.CPP, MAIN.CPP, PLOTCHAR.CPP)
@@ -366,6 +364,7 @@ function FixPal() {                 // 8 -> 6 bit, BGR -> RGB
   }
 }
 const SavedPal = new Uint8Array(768);
+const skyBase = new Uint8Array(96);             // original sky gradient colours (palette 64-95)
 const cloudBase = new Uint8Array(9);           // original colours of the cloud palette entries 55-57
 function SavePal() { SavedPal.set(palMain); }
 function SetPal() { palMain.set(SavedPal); }
@@ -442,6 +441,7 @@ async function LoadLevel() {
   await Fade2Black(0);
   palMain.set(file('dragon.tga').subarray(0x12, 0x12 + 768));
   FixPal();
+  skyBase.set(palMain.subarray(192, 288));
   for (const [dst, srcIdx] of [[55, 1], [56, 38], [57, 54]]) for (let k = 0; k < 3; k++) { palMain[dst * 3 + k] = palMain[srcIdx * 3 + k]; cloudBase[(dst - 55) * 3 + k] = palMain[srcIdx * 3 + k]; }
 }
 function LoadGame() {
@@ -589,19 +589,32 @@ async function Options() {
 // ===================================================================================
 // Game: the per-frame sections that FREEZE.CPP #includes into GameLoop
 // ===================================================================================
-function resetDropsInit() {                                  // FREEZE.CPP "Initialise Weather"
-  let ax = 0;
-  for (let i = 0; i < 400; i++) {
-    const c = (SEED2 >>> 30) & 1;
-    SEED2 = (SEED2 << 2) >>> 0;
-    if (c) { SEED2 = (SEED2 ^ 0x1D872B41) >>> 0; ax = SEED2 & 0xFFFF; }
-    ax &= 0x3FF;
-    Drops[i * 2] = ax - 350;
-    ax &= 0xFF; ax += ax;
-    Drops[i * 2 + 1] = ax;
+// ---- Night storm: day/night level, lightning and two pools of screen-space rain drops --------------------------
+const RAIN_N = 200;
+const rainX = new Float32Array(RAIN_N * 2), rainY = new Float32Array(RAIN_N * 2);   // pool 0 behind the world, pool 1 in front
+let rainPX = 0, rainPY = 0, camDX = 0, camDY = 0;
+const bolt = { x: 0, offs: new Float32Array(40), t: 0, since: 999 };
+function resetDropsInit() {
+  for (let i = 0; i < RAIN_N * 2; i++) { rainX[i] = Math.random() * 320; rainY[i] = Math.random() * 192; }
+  rainPX = wposx; rainPY = wposy; bolt.t = 0; bolt.since = 999;
+}
+const dayLevel = () => (SkyBrightDr === 0 ? SkyBright / 63 : 1 - SkyBright / 63);   // 1 = full day, 0 = full night
+const isNight = () => dayLevel() < .5;
+const outdoors = () => wposy + 100 < 1056;      // above tile row 33; the caves, the hall and the lower lane are indoors
+const weatherOn = () => (GameSetup & 2) && isNight() && outdoors();
+
+function drawRain(pool) {
+  const base = pool * RAIN_N;
+  for (let i = 0; i < RAIN_N; i++) {
+    const k = base + i;
+    // ~7 px down and ~1 px sideways per tick, minus the camera movement so the rain does not slide with the view
+    let x = rainX[k] + 1 - camDX, y = rainY[k] + 6.5 + (i % 3) * .5 - camDY;
+    x = ((x % 320) + 320) % 320; y = ((y % 192) + 192) % 192;                  // modulo wrap: camera jumps cannot break it
+    rainX[k] = x; rainY[k] = y;
+    const xi = x | 0, yi = y | 0, col = 96 + ((i + pool * 3) & 7);              // colours 96-103 cycle each tick, so the rain shimmers
+    for (let n = 0; n < 3; n++) if (yi + n < 191) buffer[(yi + n) * 320 + xi] = col;
   }
 }
-const weatherOn = () => (GameSetup & 2) && (SkyBrightDr === 0 ? SkyBright <= 30 : SkyBright > 30);
 
 // SKYRAIN.H: sky gradient (colours 64-95), lightning, background rain
 function skyrain() {
@@ -615,64 +628,19 @@ function skyrain() {
     buffer.fill(col, di, di + 960); di += 960;
     col = ((col + 1) & 31) + 64;
   }
-  if (!weatherOn()) return;
-  // --- lightning
-  let ax = col, dx = 0;       // ax/dx are stale if no carry; ax then holds a sky colour (>20) so nothing strikes
-  {
-    const c1 = SEED2 >>> 31; SEED2 = (SEED2 << 1) >>> 0;
-    if (c1) { SEED2 = (SEED2 ^ 0x1D872B41) >>> 0; ax = SEED2 & 0xFFFF; dx = SEED2 >>> 16; }
-    if ((ax & 255) <= 20) {
-      thunder();
-      ax &= 3;
-      let STK4 = ax;
-      dx = (dx & 255) + 32;
-      if (dx >= 160) STK4 = -STK4;
-      let STK1 = dx, STK2 = 0, bx = 0;
-      for (let k = 0; k < 40; k++) {
-        const cc = SEED2 >>> 31; SEED2 = (SEED2 << 1) >>> 0;
-        if (cc) { SEED2 = (SEED2 ^ 0x1D872B41) >>> 0; ax = SEED2 & 0xFFFF; }
-        ax = ((ax & 15) + dx + bx) & 0xFFFF;
-        const STK3 = s16(ax);
-        Line(STK1, STK2, STK3, STK2 + 5);
-        STK1 = s16(ax); STK2 += 5; bx += STK4;
-      }
-    }
+  camDX = s16(wposx - rainPX); camDY = s16(wposy - rainPY); rainPX = wposx; rainPY = wposy;
+  bolt.since++;
+  if (!weatherOn()) { bolt.t = 0; return; }
+  // --- lightning: ~0.5% chance per tick, at least 1 s apart; 40 segments of 5 px, 2 px wide, pure white, visible 5 ticks
+  if (bolt.t > 0) bolt.t--;
+  else if (bolt.since > 70 && Math.random() < .005) {
+    bolt.x = 32 + Math.random() * 256;
+    for (let i = 0; i < 40; i++) bolt.offs[i] = Math.random() * 9 - 4.5;
+    bolt.t = 5; bolt.since = 0;
+    thunder();
   }
-  // --- background rain
-  ax = wposx;
-  DXPos = s16(DXPos - wposx); DYPos = s16(DYPos - wposy);
-  const bx2 = DXPos, dy2 = DYPos;
-  DXPos2 = bx2; DYPos2 = dy2;
-  rain(0, 200, bx2, dy2, 2, ax);
-  DXPos = wposx; DYPos = wposy;
-}
-function rain(first, count, bx, dx, fall, ax) {
-  for (let i = first; i < first + count; i++) {
-    Drops[i * 2] += bx; Drops[i * 2 + 1] += dx;
-    const x = Drops[i * 2], y = Drops[i * 2 + 1];
-    if (x >= 0 && x <= 319) {
-      ax = y;
-      if (!(ax < 0 || ax > 190)) {
-        const di = x + ax * 320;
-        ax = (ax << 8) & 0xFFFF;
-        const si = (DROPBASE + i * 4) & 0xFFFF;
-        ax = (ax & 0xFF00) | (SEED2 & 255);
-        ax ^= si;
-        buffer[di & 0xFFFF] = (ax & 7) + 96;
-        ax = (ax & 0xFF00) | ((ax & 7) + 96);
-      }
-    }
-    Drops[i * 2 + 1] += fall;
-    const ny = Drops[i * 2 + 1];
-    if (ny > 350 || ny < -300) {
-      const c = SEED2 >>> 31; SEED2 = (SEED2 << 1) >>> 0;
-      if (c) { SEED2 = (SEED2 ^ 0x1D872B41) >>> 0; ax = SEED2 & 0xFFFF; }
-      ax &= 0x3FF; ax = (ax - 352) & 0xFFFF;
-      Drops[i * 2] = ax;
-      ax &= 0x0F;
-      Drops[i * 2 + 1] = ax;
-    }
-  }
+  if (bolt.t > 0) { let x = bolt.x; for (let i = 0; i < 40; i++) { const nx = x + bolt.offs[i]; Line(Math.round(x), i * 5, Math.round(nx), i * 5 + 5); x = nx; } }
+  drawRain(0);
 }
 
 // SKYPLOT.H: parallax sky tiles
@@ -837,7 +805,7 @@ function flndrain() {
     dx += 32; ti += 117;
   }
   FTileIndex = ti;
-  if (weatherOn()) rain(200, 200, DXPos2, DYPos2, 3, 0);
+  if (weatherOn()) drawRain(1);
 }
 
 // COLLANI.H: bonuses, enemies, platforms, ice balls
@@ -1335,11 +1303,10 @@ async function GameLoop() {
         if (Timer !== 0) Timer = (Timer + 1) & 0xFFFF;
       }
       // ---- Sky colour control (64-95)
-      let a = frameinc & 4095;
+      let a = frameinc & 4095;                                // every 4096 ticks (~58 s) day <-> night, a ~252 tick fade
       if (a === 4095) SkyBrightCt = 1;
       a &= 3;
       if (a === 3 && SkyBrightCt !== 0) {
-        for (let k = 0; k < 32; k++) palMain[192 + k * 3 + 1] = (palMain[192 + k * 3 + 1] + (SkyBrightDr === 1 ? 1 : -1)) & 255;
         if (--SkyBright === 0) { SkyBright = 63; SkyBrightDr ^= 1; SkyBrightCt = 0; }
       }
       // ---- Cycle colours (96-103)
@@ -1347,7 +1314,12 @@ async function GameLoop() {
       for (let k = 0; k < 7; k++) { palMain[o + k * 3] = palMain[o + k * 3 + 3]; palMain[o + k * 3 + 1] = palMain[o + k * 3 + 4]; palMain[o + k * 3 + 2] = palMain[o + k * 3 + 5]; }
       palMain[o + 21] = r0; palMain[o + 22] = g0; palMain[o + 23] = b0;
       // clouds follow the sky: bright by day, dark bluish-grey at night
-      const lvl = SkyBrightDr === 0 ? SkyBright / 63 : 1 - SkyBright / 63;
+      const lvl = Math.min(1, dayLevel() + (bolt.t > 0 ? .6 : 0));      // a lightning flash lifts the sky and clouds
+      for (let k = 0; k < 32; k++) {                                       // sky goes deep blue, not just grey
+        palMain[192 + k * 3] = Math.round(skyBase[k * 3] * (.12 + .88 * lvl));
+        palMain[193 + k * 3] = Math.round(skyBase[k * 3 + 1] * (.06 + .94 * lvl));
+        palMain[194 + k * 3] = Math.round(skyBase[k * 3 + 2] * (.30 + .70 * lvl));
+      }
       for (let c = 0; c < 3; c++) {
         palMain[165 + c * 3] = Math.round(cloudBase[c * 3] * (.28 + .72 * lvl) * (.72 + .28 * lvl));
         palMain[166 + c * 3] = Math.round(cloudBase[c * 3 + 1] * (.28 + .72 * lvl) * (.78 + .22 * lvl));
