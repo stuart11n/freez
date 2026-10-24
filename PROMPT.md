@@ -214,16 +214,25 @@ Score is a 16-bit unsigned value shown with 6 digits; display counts toward it (
   offset by a `BridgeDynamics[row*32 + i]` value that depends on where the dragon stands, giving a sagging
   rope bridge.
 - **Sky gradient**: palette indices 64-95 form a 32-colour gradient; it scrolls vertically with the camera
-  in 3-row bands. Day/night: every 4096 ticks the 32 sky colours' green channel fades down by 63 over 252
-  ticks (night), and 4096 ticks later back up (day). Weather (rain and lightning) is active only during the
-  dark half and only if the setting is on.
-- **Rain**: 200 background drops (drawn before the land) and 200 foreground drops (after), world-motion
-  compensated, colour `96 + (0..7)` (the cycling colours).
-- **Lightning**: a few percent of ticks at night draw a jagged white line (2 px wide, colour 1) from the top
-  of the sky in 40 segments of 5 px.
-- **Clouds fade (2026)**: remap the cloud tiles' colours to private palette entries 55/56/57 at load; at
-  night multiply those entries by roughly `0.28 + 0.72*lvl` (slightly bluer), where `lvl` = day/night
-  brightness 0..1.
+  in 3-row bands.
+- **Day/night clock**: a tick counter advances once per simulation tick. Every 4096 ticks (about a minute) the
+  world flips between day and night with a smooth fade of a brightness value `lvl` (1 = day, 0 = night) over
+  252 ticks, never a hard cut; start in daytime. Night is `lvl < 0.5`. Each tick the sky palette (from its saved
+  original colours) is multiplied per channel: R x (0.12 + 0.88 lvl), G x (0.06 + 0.94 lvl), B x (0.30 + 0.70
+  lvl), so the sky goes deep blue rather than grey. Clouds use private palette entries 55-57 (remapped at load)
+  multiplied by about `0.28 + 0.72 lvl` with a slightly bluer tint.
+- **Night storm** (rain, lightning, thunder) runs only when it is night AND the Weather option is on AND the
+  player is outdoors (world y of the player above tile row 33, i.e. not in the caves, hall or lower lane).
+  - Rain: two pools of 200 drops, one drawn behind the world (right after the sky) and one in front (after
+    the foreground tiles). Drops live in screen space: each tick move about 7 px down and 1 px sideways, then
+    subtract the camera movement since the last frame (so rain does not slide when the view scrolls); wrap
+    with modulo so respawns/teleports cannot break it. Draw each as a 3 px vertical streak in one of the
+    cycling colours 96-103 so it shimmers.
+  - Lightning: each tick with probability about 0.5% and at least 70 ticks (1 s) since the last strike, start a
+    bolt: a random start x (32..288) plus 40 random horizontal offsets within +/-4.5 px. Draw it from the top
+    of the screen as 40 segments of 5 px, 2 px wide, pure white (palette 1), behind the foreground terrain,
+    for 5 ticks. While it is visible raise `lvl` by 0.6 (clamped) for the sky and clouds to flash them.
+  - Thunder: on each strike (rate-limited, see 9.4).
 - **Status bar** (8 rows at y=192): timer (hourglass icon + seconds = ticks>>6), energy (heart + 3 digits),
   lives, level number, score (6 digits), and icons for rapid fire and super jump that blink in their last 5
   seconds. Timer and energy icons blink when low.
@@ -281,7 +290,7 @@ frame reaches the landing squat (frame >> 2 == 7). Active within **600 px** of t
 off-screen), quieter and panned by distance; only for enemies in status 0.
 
 ### 9.4 Thunder
-During night storms, rate-limited to one rumble per 9-18 s after a lightning strike, 0.2-1 s delayed:
+On a lightning strike, 0.2-1 s later and rate-limited to one rumble per 9-18 s:
 brown noise through a low-pass sweeping 1100->140 Hz, passed through a tanh waveshaper (so small speakers
 reproduce it), with a crack, two rolling swells, 3-4.5 s long, peak gain about 0.3.
 
