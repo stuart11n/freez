@@ -16,10 +16,29 @@ const dac = new Uint8Array(768);          // VGA DAC, 6 bit components
 
 function setDAC(arr) { dac.set(arr.subarray(0, 768)); }
 let gameActive = false;
+let introSnap = null, levelBlend = 0;   // RGB snapshot of the level interstitial; 1→0 crossfade into gameplay
+const LEVEL_BLEND_FRAMES = 70;           // ~1 s at 70 Hz
 // Below 10% energy: hurt 0→1 as Energy 10→0 (full desat + view shrunk to 50% at death). Off outside gameplay.
 function present() {
   const hurt = (gameActive && Energy < 10) ? (10 - Energy) / 10 : 0;
-  Gfx.draw(vram, dac, hurt);
+  Gfx.draw(vram, dac, hurt, introSnap, levelBlend);
+  if (levelBlend > 0) {
+    levelBlend = Math.max(0, levelBlend - 1 / LEVEL_BLEND_FRAMES);
+    if (levelBlend === 0) introSnap = null;
+  }
+}
+function captureIntroSnap() {
+  const snap = new Uint8ClampedArray(64000 * 4);
+  for (let i = 0; i < 64000; i++) {
+    const p = buffer[i] * 3, o = i << 2;
+    const r = dac[p] & 63, g = dac[p + 1] & 63, b = dac[p + 2] & 63;
+    snap[o] = (r << 2) | (r >> 4);
+    snap[o + 1] = (g << 2) | (g >> 4);
+    snap[o + 2] = (b << 2) | (b >> 4);
+    snap[o + 3] = 255;
+  }
+  introSnap = snap;
+  levelBlend = 1;
 }
 
 let acc = 0, lastT = performance.now(), waiter = null;
@@ -441,6 +460,7 @@ async function LoadLevel() {
   LoadLogo(CurrentLevel + 9);
   await FadeFromBlack(0);
   await sleep(1000);                                         // mobile build: hold the level intro screen 1s longer
+  captureIntroSnap();                                        // keep the interstitial visible; crossfade into gameplay below
   BridgeGFX.set(file('brdg1.tga').subarray(0x312, 0x312 + 64));
   tile1.set(file('tset1a.tga').subarray(0x312, 0x312 + 65535));
   tile2.set(file('tset1b.tga').subarray(0x312, 0x312 + 65535));
@@ -452,11 +472,12 @@ async function LoadLevel() {
   En.a.fill(0); En.a.set(file('emap1.map').subarray(0, 2600));
   Bn.a.fill(0); Bn.a.set(file('bmap1.map').subarray(0, 2000));
   skymap.set(file('smap1.map').subarray(0, 2048));
-  await Fade2Black(0);
+  // no Fade2Black — GameLoop crossfades from the captured interstitial into the first playfield frames
   palMain.set(file('dragon.tga').subarray(0x12, 0x12 + 768));
   FixPal();
   skyBase.set(palMain.subarray(192, 288));
   for (const [dst, srcIdx] of [[55, 1], [56, 38], [57, 54]]) for (let k = 0; k < 3; k++) { palMain[dst * 3 + k] = palMain[srcIdx * 3 + k]; cloudBase[(dst - 55) * 3 + k] = palMain[srcIdx * 3 + k]; }
+  FadeStore.set(palMain);                                    // so the MCB&128 fade-in becomes a no-op / instant palette switch
 }
 function LoadGame() {
   MCANIM.set(file('dragon.tga').subarray(0x312, 0x312 + 36864));
@@ -700,27 +721,42 @@ function drawFlock() {
   }
 }
 
-// SKYPLOT.H: parallax sky tiles
-function skyplot() {
-  if (!(GameSetup & 4)) return;
+// SKYPLOT.H: parallax sky tiles — clouds drift slowly, each band at its own rate
+// skymap only holds cloud tiles 47-52 (plus empty); keep multi-tile clouds together by band
+const cloudOff = [0, 0, 0];                                  // pixel drift in sky-space (half of world)
+const CLOUD_RATE = [0.05, 0.11, 0.19];                        // px/frame @ 70Hz ≈ one tile / 9s, 4s, 2.4s
+function cloudBand(t) { return t <= 49 ? 0 : t === 50 ? 1 : 2; }  // 47-49 | 50 | 51-52
+function advanceClouds() {
+  for (let i = 0; i < 3; i++) {
+    cloudOff[i] += CLOUD_RATE[i];
+    if (cloudOff[i] >= 2048) cloudOff[i] -= 2048;
+  }
+}
+function plotSkyBand(drift, band) {
   const wx = wposx & 0xFFFF, wy = wposy & 0xFFFF;
-  TileX = -((wx >> 1) & 0x1F);
+  const sx = (wx >> 1) + (drift | 0);
+  const tileX0 = -(sx & 0x1F);
   let si = wy >> 1;
   let cx = si;
   si = -(si & 0x1F);
   cx = ((cx & 0xFFE0) * 2) & 0xFFFF;
-  TileIndex = ((wx >> 6) + cx) & 0xFFFF;
+  let ti = ((sx >> 5) + cx) & 0xFFFF;
   for (let y = 0; y < 7; y++) {
-    let di = TileX;
+    let di = tileX0;
     for (let x = 0; x < 11; x++) {
       if (!(di > 319 || di < -31 || si > 190 || si < -31)) {
-        const al = skymap[TileIndex];
-        if (al) ptile(di, si, al);
+        const al = skymap[ti & 2047];
+        if (al && cloudBand(al) === band) ptile(di, si, al);
       }
-      di += 32; TileIndex++;
+      di += 32; ti++;
     }
-    si += 32; TileIndex += 53;
+    si += 32; ti += 53;
   }
+}
+function skyplot() {
+  if (!(GameSetup & 4)) return;
+  advanceClouds();
+  for (let b = 0; b < 3; b++) plotSkyBand(cloudOff[b], b);
 }
 
 // BRIDGE.H
@@ -1399,7 +1435,10 @@ async function GameLoop() {
       // NOSCCS: straight to buffer copy
     }
     vram.set(buffer.subarray(0, 64000));
-    if (MCB & 128) { await FadeFromBlack(0); MCB &= 127; }
+    if (MCB & 128) {
+      if (levelBlend > 0) { setDAC(palMain); FadeStore.set(palMain); MCB &= 127; }   // palette swap; pixels crossfade via introSnap
+      else { await FadeFromBlack(0); MCB &= 127; }                                   // deaths / continues still fade up from black
+    }
 
     // ---- New life initialise
     if (LastStat === 14) {

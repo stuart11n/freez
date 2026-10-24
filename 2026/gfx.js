@@ -139,13 +139,24 @@ void main(){
     new ResizeObserver(resize).observe(canvas);
     addEventListener('resize', resize);
   }
-  function draw(vram, dac, hurt) {
+  function draw(vram, dac, hurt, blendSnap, blendAmt) {
     const hAmt = Math.max(0, Math.min(1, hurt || 0));
+    const bAmt = Math.max(0, Math.min(1, blendAmt || 0));
     for (let i = 0; i < 256; i++) {
       const r = dac[i * 3] & 63, g = dac[i * 3 + 1] & 63, b = dac[i * 3 + 2] & 63;
       lut[i] = (255 << 24) | (((b << 2) | (b >> 4)) << 16) | (((g << 2) | (g >> 4)) << 8) | ((r << 2) | (r >> 4));
     }
     for (let i = 0; i < 64000; i++) px32[i] = lut[vram[i]];
+    // Crossfade from a captured interstitial RGB snapshot into the live game frame
+    if (blendSnap && bAmt > 0.001) {
+      const ia = 1 - bAmt;
+      for (let i = 0; i < 64000; i++) {
+        const o = i << 2;
+        px[o] = (px[o] * ia + blendSnap[o] * bAmt + 0.5) | 0;
+        px[o + 1] = (px[o + 1] * ia + blendSnap[o + 1] * bAmt + 0.5) | 0;
+        px[o + 2] = (px[o + 2] * ia + blendSnap[o + 2] * bAmt + 0.5) | 0;
+      }
+    }
     if (gl) {
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 320, 200, gl.RGBA, gl.UNSIGNED_BYTE, px);
