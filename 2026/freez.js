@@ -77,11 +77,18 @@ const pressedAt = new Map();
 addEventListener('keyup', e => {
   if (CODEMAP[e.code] !== undefined) e.preventDefault();
   // keep very short taps down for at least ~2 ticks so a 70Hz poll cannot miss them (a real keyboard IRQ never would)
-  const wait = 2 * TICK - (performance.now() - (pressedAt.get(e.code) || 0));
-  const release = () => { heldCodes.delete(e.code); applyKeys(); };
+  const started = pressedAt.get(e.code) || 0;
+  const wait = 2 * TICK - (performance.now() - started);
+  const release = () => {
+    if ((pressedAt.get(e.code) || 0) !== started) return;
+    heldCodes.delete(e.code); applyKeys();
+  };
   if (wait > 0) setTimeout(release, wait); else release();
 });
-addEventListener('blur', () => { heldCodes.clear(); applyKeys(); });
+const clearKeys = () => { heldCodes.clear(); applyKeys(); };
+addEventListener('blur', clearKeys);
+addEventListener('pagehide', clearKeys);
+addEventListener('visibilitychange', () => { if (document.hidden) clearKeys(); });
 let startResolve = null;
 
 // --- sound (replaces the Sound Blaster driver in SOUND.C) -------------------------------------
